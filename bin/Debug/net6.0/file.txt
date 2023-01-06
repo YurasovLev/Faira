@@ -1,0 +1,2 @@
+2023-01-06 13:14:46.1343|INFO|Main.MainClass|Hello world
+2023-01-06 13:20:02.8908|INFO|Main.MainClass|Hello world!!!
