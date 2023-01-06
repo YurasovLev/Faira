@@ -13,18 +13,19 @@ namespace Main {
         public static string url = "http://localhost:8000/";
         public static int requestCount = 0;
         public static string PageData = "<html><p>404</p></html>";
-
+        private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
 
         public static async Task Run()
         {
-            Logger.Log("Server Is Running");
+            runServer = true;
+            Logger.Info("Server is running");
             PageData = await (new StreamReader(Program.RootPath+$"/Data/HTML/Base.html")).ReadToEndAsync();
             runServer = true;
 
             // Создаем считыватель входящих запросов.
             listener.Prefixes.Add(url);
             listener.Start();
-            Logger.Log($"Listening for connections on {url}");
+            Logger.Info($"Listening for connections on {url}");
 
             // Запускаем сбор всех входящих запросов
             while (runServer)
@@ -37,11 +38,11 @@ namespace Main {
                 HttpListenerResponse resp = ctx.Response;
 
                 // Отправляем в логи информацию о запросе.
-                Logger.Log($"Request #: {++requestCount}", "Info");
-                Logger.Log(req.Url.ToString(), "Info");
-                Logger.Log(req.HttpMethod, "Info");
-                Logger.Log(req.UserHostName, "Info");
-                Logger.Log(req.UserAgent, "Info");
+                Logger.Info($"Request #: {++requestCount}");
+                Logger.Debug(req.Url.ToString());
+                Logger.Debug(req.HttpMethod);
+                Logger.Debug(req.UserHostName);
+                Logger.Debug(req.UserAgent);
 
                 // Write the response info
                 byte[] data = Encoding.UTF8.GetBytes(PageData);
@@ -58,7 +59,7 @@ namespace Main {
             runServer = false;
 
             listener.Close();
-            Logger.Log("Server close");
+            Logger.Info("Server is stopped");
         }
     }
 }
