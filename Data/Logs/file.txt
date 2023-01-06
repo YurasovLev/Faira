@@ -1,4 +1,0 @@
-2023-01-06 13:26:47.7328|INFO|Main.Program|Hello world
-2023-01-06 13:32:55.7710|INFO|Main.Program|Hello world
-2023-01-06 13:32:55.8042|ERROR|Main.Program|Goodbye cruel world|System.Exception: ERRROROROROROROROROORO!!!!!!!!!!!!!!!!!
-   at Main.Program.Main(String[] Args) in /home/yurasov-lev/Документы/code/C#/Faira/Program.cs:line 27
