@@ -2,47 +2,30 @@
 using System.IO;
 using System.Text;
 using System.Net;
-using System.Threading.Tasks;
+using System.Threading;
+using System.Configuration;
 using NLog;
 
 namespace Main
 {
     class Program {
-        public static readonly string RootPath = Path.GetFullPath(@".");
-        public static string LogPath = RootPath+"/Data/Logs/${shortdate}/";
         private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-        private static bool ProgramRunning = true;
-        public static void Main(string[] Args) {
-            var config = new NLog.Config.LoggingConfiguration();
+        public static readonly string RootPath = Path.GetFullPath(@".");
+        public static readonly string ConfigsPath = RootPath + ReadSetting("PathToConfigs");
+        public static readonly string HtmlPath = RootPath + ReadSetting("PathToHtml");
+        private static bool programRunning = true;
+        public static bool ProgramRunning {get{return programRunning;}}
+        public static async Task Main(string[] Args) {
+            NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(ConfigsPath+"/NLog.config");
 
-            var logfile    = new NLog.Targets.FileTarget("logfile")       { FileName = LogPath+"Log_${logger}.log",   Layout = "[${longdate}](${level:uppercase=true}) ${message:withexception=true}" };
-            var tracefile  = new NLog.Targets.FileTarget("logfile")       { FileName = LogPath+"Trace_${logger}.log", Layout = "[${longdate}](${level:uppercase=true}) ${message:withexception=true}" };
-            var logconsole = new NLog.Targets.ConsoleTarget("logconsole") { Layout = "[${date}](${level:uppercase=true})|${logger}| ${message:withexception=true}"};
-                        
-            // Rules for mapping loggers to targets
-            config.AddRule(LogLevel.Info, LogLevel.Fatal, logfile);
-            config.AddRule(LogLevel.Trace, LogLevel.Fatal, tracefile);
-            config.AddRule(LogLevel.Info,  LogLevel.Fatal, logconsole);
-            
-            NLog.LogManager.Configuration = config;
+
             Console.CancelKeyPress += new ConsoleCancelEventHandler(myHandler);
+            
 
             try {
                 Logger.Info("Program is running");
                 Server.Run();
-                while (Server.RunServer && ProgramRunning) {
-                    try {
-                        if(Console.KeyAvailable) {
-                            string text = (Console.ReadLine() ?? "").ToLower().Trim();
-                            if (text.Length > 0) {
-                                Logger.Debug($"Entered: {text}");
-                                if(text == "stop") break;
-                                if(text == "crash") throw new Exception("Crash");
-                                if(text == "bag") throw new ArgumentNullException("BAG");
-                            }
-                        }
-                    } catch (ArgumentNullException err) {Logger.Warn(err, "A bag.");}
-                }
+                await Terminal.Run();
             } catch (Exception err) {
                 Logger.Fatal(err, "Error");
             } finally {
@@ -51,15 +34,34 @@ namespace Main
                 NLog.LogManager.Shutdown();
             }
         }
-        protected static void myHandler(object sender, ConsoleCancelEventArgs args)
+        public static void Stop() {
+            programRunning = false;
+        }
+        private static void myHandler(object? sender, ConsoleCancelEventArgs args)
         {
-            args.Cancel = true;
             Logger.Info("Ctrl + C is pressed");
             Console.WriteLine("\nAre you sure you want to complete the program? [y/N]");
             if(Char.ToLower(Console.ReadKey().KeyChar) == 'y') {
-                Logger.Info("Stopping programm");
-                ProgramRunning = false;
-            } else Logger.Info("Program continues work");
+                Logger.Info("Killing program");
+            } else {
+                Logger.Info("Program continues work");
+                args.Cancel = true;
+            }
         }
+        public static string? ReadSetting(string key)  
+        {  
+            try  
+            {
+                string? result = ConfigurationManager.AppSettings[key] ?? null;
+                Logger.Debug("Read settings with key \'{0}\'", key);
+                Logger.Trace("Result: Key \'{0}\', Value \'{1}\'", key, result);
+                return result;
+            }  
+            catch (ConfigurationErrorsException)  
+            {  
+                Logger.Warn("Error reading app settings. Key: {0}", key);
+                return null;
+            }
+        } 
     }
 }
