@@ -15,13 +15,13 @@ namespace Main {
         public static int requestCount = 0;
         public static string PageData = "<html><p>404</p></html>";
         private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-        private static Thread worker = new Thread(Server.Worker);
+        private static Task worker = new Task(Server.Worker);
 
-        public static async void Run()
+        public static void Run()
         {
             listener.Prefixes.Add(url);
             listener.Start();
-            PageData = await (new StreamReader(PathToHtml)).ReadToEndAsync();
+            PageData = (new StreamReader(PathToHtml)).ReadToEnd();
 
             worker.Start();
         }
@@ -29,23 +29,32 @@ namespace Main {
             runServer = true;
             Logger.Info("Server is running");
             Logger.Info($"Listening for connections on {url}");
+            // Подготавливаем первый ассинхронный запрос
+            Task<HttpListenerContext> ctx = listener.GetContextAsync();
 
             // Запускаем сбор всех входящих запросов
             while (runServer)
             {
-                // Ожидаем контекст запроса и отправляем его в ассинхронную функцию.
+                // Получив запрос, отправляем его в новую задачу, а после ждем следующий.
                 try {
-                    Processing(listener.GetContext());
+                    // Logger.Trace("Update requests\nComplete: {0}\nSuccessfully: {1}\nCanceled: {2}", ctx.IsCompleted, ctx.IsCompletedSuccessfully, ctx.IsCanceled);
+                    if(ctx.IsCompletedSuccessfully) {
+                        Logger.Info("Request #: ${0}", ++requestCount);
+                        Task.Factory.StartNew(Processing, ctx.GetAwaiter().GetResult(), TaskCreationOptions.AttachedToParent);
+                    }
+                    if(ctx.IsCompleted || ctx.IsCanceled) ctx = listener.GetContextAsync();
+                    else Thread.Sleep(1);
                 } catch (HttpListenerException) { Logger.Debug("Listener closed"); }
             }
+            return;
         }
-        private static async void Processing(HttpListenerContext ctx) {
+        private static async void Processing(object? obj) {
+            HttpListenerContext ctx = (HttpListenerContext) obj;
             // Получаем Запрос и Ответ. (Request, Responce)
             HttpListenerRequest req = ctx.Request;
             HttpListenerResponse resp = ctx.Response;
 
             // Отправляем в логи информацию о запросе.
-            Logger.Info("Request #: ${0}", ++requestCount);
             Logger.Debug("Data in Request\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}", req.HttpMethod, req.RawUrl, req.UserHostName, req.UserAgent);
 
             // Write the response info
@@ -64,6 +73,7 @@ namespace Main {
                 runServer = false;
                 listener.Stop();
                 listener.Close();
+                Logger.Info("Status of worker: {0}", worker.Status);
                 Logger.Info("Server is stopped");
             }
         }
