@@ -9,12 +9,16 @@ namespace Main {
         private static readonly HttpListener listener = new HttpListener();
         public static readonly string url = Program.ReadSetting("HOST_URL") ?? "http://localhost:1111/";
         public static readonly string PathToHtml = Program.HtmlPath + "/Base.html";
-        public static string PageData = (new StreamReader(PathToHtml)).ReadToEnd() ?? "<html><p>404</p></html>";
+        public static string PageData = "<html><p>404</p></html>";
         public static bool IsServerRunning {get{return _IsServerRunning;} private set{_IsServerRunning=value;}}
         private static volatile bool _IsServerRunning = true;
 
         public static void Run()
         {
+            using (var stream = new StreamReader(PathToHtml)) {
+                PageData = stream.ReadToEnd();
+                stream.Close();
+            }
             listener.Prefixes.Add(url);
             listener.Start();
 
@@ -35,7 +39,7 @@ namespace Main {
                     if(ctx.IsCompletedSuccessfully) {
                         // Если контекст успешно получен, отправляем его на обработку в отдельный поток.
                         var result = ctx.GetAwaiter().GetResult();
-                        Logger.Info("Request by: ${0}", result.Request.UserHostAddress);
+                        Logger.Info("Request");
                         Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent);
                     }
                     if(ctx.IsCompleted || ctx.IsCanceled) ctx = listener.GetContextAsync(); // Независимо от результата запускаем следующее ожидание.
@@ -57,15 +61,33 @@ namespace Main {
 
             Logger.Debug("Data in Request\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}", req.HttpMethod, req.RawUrl, req.UserHostName, req.UserAgent);
 
-            // Write the response info
-            byte[] data = Encoding.UTF8.GetBytes(PageData);
-            resp.ContentType = "text/html";
-            resp.ContentEncoding = Encoding.UTF8;
-            resp.ContentLength64 = data.LongLength;
+            switch(req.HttpMethod) {
+                case "TRACE":
+                    Logger.Info("Respone Trace");
+                    resp.ContentType = req.ContentType;
+                    resp.ContentEncoding = req.ContentEncoding;
+                    resp.ContentLength64 = req.ContentLength64;
+                    byte[] echodata = Encoding.UTF8.GetBytes("Echo");
+                    await resp.OutputStream.WriteAsync(echodata, 0, echodata.Length);
+                    resp.Close();
+                    break;
+                case "GET":
+                    Logger.Info("Respone Get");
+                    // Write the response info
+                    byte[] data = Encoding.UTF8.GetBytes(PageData);
+                    resp.ContentType = "text/html";
+                    resp.ContentEncoding = Encoding.UTF8;
+                    resp.ContentLength64 = data.LongLength;
 
-            // Write out to the response stream (asynchronously), then close it
-            await resp.OutputStream.WriteAsync(data, 0, data.Length);
-            resp.Close();
+                    // Write out to the response stream (asynchronously), then close it
+                    await resp.OutputStream.WriteAsync(data, 0, data.Length);
+                    resp.Close();
+                    break;
+                default:
+                    Logger.Info("Abort Responce");
+                    resp.Abort();
+                    break;
+            }
         }
         ///<summary>
         // Метод останавливающий сервер.
