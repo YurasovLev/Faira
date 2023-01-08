@@ -1,25 +1,24 @@
-using System;
-using System.IO;
-using System.Text;
-using System.Net;
-using System.Threading;
+/*
+Данный класс отвечает за взаимодействие с сервером посредством консоли прямо во время его работы.
+*/
 
 namespace Main {
-    class Terminal {
+    sealed class Terminal {
         private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
         public static readonly Dictionary<string, Func<string[], int>> Commands = new Dictionary<string, Func<string[], int>>();
-        public static async Task Run() {
+        public static void Run() {
             Commands.Add("stop", (string[] args) => { Program.Stop(); return 0; });
             Commands.Add("echo", (string[] args) => { Console.WriteLine(string.Join(" ", args)); return 0; });
             Commands.Add("help", (string[] args) => { Console.WriteLine("Commands:"); foreach (string c in Commands.Keys) Console.WriteLine($"  {c}"); return 0; });
             Commands.Add("readsetting", (string[] args) => { Logger.Info("Value: {0}", Program.ReadSetting(args[1])); return 0; });
 
 
-            while (Program.ProgramRunning) {
+            while (Program.IsProgramRunning) {
                 try {
                     if(Console.KeyAvailable) {
                         string text = (Console.ReadLine() ?? "").ToLower().Trim();
-                        string[] args = text.Split(" ");
+                        string[] args = text.Split(" "); // Для удобства сразу разделяем строку на части
+
                         if (args.Length > 0) {
                             Logger.Debug("Entered: {0}", text);
                             try {

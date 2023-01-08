@@ -1,60 +1,60 @@
-using System;
-using System.IO;
 using System.Text;
 using System.Net;
-using System.Threading.Tasks;
 
 namespace Main {
-    class Server
+    sealed class Server
     {
-        private static bool runServer = true;
-        public static bool RunServer {get{return runServer;}}
-        public static HttpListener listener = new HttpListener();
-        public static string url = Program.ReadSetting("HOST_URL") ?? "http://localhost:1111/";
-        public static string PathToHtml = Program.HtmlPath + "/Base.html";
-        public static int requestCount = 0;
-        public static string PageData = "<html><p>404</p></html>";
         private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-        private static Task worker = new Task(Server.Worker);
+        private static readonly Task ServerWorker = new Task(Server.Worker);
+        private static readonly HttpListener listener = new HttpListener();
+        public static readonly string url = Program.ReadSetting("HOST_URL") ?? "http://localhost:1111/";
+        public static readonly string PathToHtml = Program.HtmlPath + "/Base.html";
+        public static string PageData = (new StreamReader(PathToHtml)).ReadToEnd() ?? "<html><p>404</p></html>";
+        public static bool IsServerRunning {get{return _IsServerRunning;} private set{_IsServerRunning=value;}}
+        private static volatile bool _IsServerRunning = true;
 
         public static void Run()
         {
             listener.Prefixes.Add(url);
             listener.Start();
-            PageData = (new StreamReader(PathToHtml)).ReadToEnd();
 
-            worker.Start();
+            ServerWorker.Start();
         }
+        ///<summary>
+        /// Метод принимающий запросы
+        ///</summary>
         private static void Worker() {
-            runServer = true;
             Logger.Info("Server is running");
             Logger.Info($"Listening for connections on {url}");
-            // Подготавливаем первый ассинхронный запрос
-            Task<HttpListenerContext> ctx = listener.GetContextAsync();
 
-            // Запускаем сбор всех входящих запросов
-            while (runServer)
+            Task<HttpListenerContext> ctx = listener.GetContextAsync();
+            while (IsServerRunning)
             {
-                // Получив запрос, отправляем его в новую задачу, а после ждем следующий.
                 try {
-                    // Logger.Trace("Update requests\nComplete: {0}\nSuccessfully: {1}\nCanceled: {2}", ctx.IsCompleted, ctx.IsCompletedSuccessfully, ctx.IsCanceled);
+                    // Ждем пока не будет завершено ассинхронное получение контекста.
                     if(ctx.IsCompletedSuccessfully) {
-                        Logger.Info("Request #: ${0}", ++requestCount);
-                        Task.Factory.StartNew(Processing, ctx.GetAwaiter().GetResult(), TaskCreationOptions.AttachedToParent);
+                        // Если контекст успешно получен, отправляем его на обработку в отдельный поток.
+                        var result = ctx.GetAwaiter().GetResult();
+                        Logger.Info("Request by: ${0}", result.Request.UserHostAddress);
+                        Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent);
                     }
-                    if(ctx.IsCompleted || ctx.IsCanceled) ctx = listener.GetContextAsync();
-                    else Thread.Sleep(1);
-                } catch (HttpListenerException) { Logger.Debug("Listener closed"); }
+                    if(ctx.IsCompleted || ctx.IsCanceled) ctx = listener.GetContextAsync(); // Независимо от результата запускаем следующее ожидание.
+                    else Thread.Sleep(1); // Небольшая магическая задержка. Без неё сервер отвечает плохо (Если отвечает в принципе).
+                } 
+                catch (HttpListenerException err){ Logger.Warn(err, "Error when update the requests"); }
+                catch (HttpRequestException err) { Logger.Warn(err, "Error when accepting the request"); }
             }
             return;
         }
+        ///<summary>
+        /// Метод обрабатывающий запросы
+        ///</summary>
         private static async void Processing(object? obj) {
-            HttpListenerContext ctx = (HttpListenerContext) obj;
-            // Получаем Запрос и Ответ. (Request, Responce)
-            HttpListenerRequest req = ctx.Request;
+            HttpListenerContext? ctx = (HttpListenerContext?) obj;
+            if(ctx is null) throw new HttpRequestException("Context is null"); 
+            HttpListenerRequest  req  = ctx.Request;
             HttpListenerResponse resp = ctx.Response;
 
-            // Отправляем в логи информацию о запросе.
             Logger.Debug("Data in Request\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}", req.HttpMethod, req.RawUrl, req.UserHostName, req.UserAgent);
 
             // Write the response info
@@ -67,13 +67,15 @@ namespace Main {
             await resp.OutputStream.WriteAsync(data, 0, data.Length);
             resp.Close();
         }
+        ///<summary>
+        // Метод останавливающий сервер.
+        ///</summary>
         public static void Stop() {
             Logger.Debug("Request to stop server");
-            if(runServer) {
-                runServer = false;
+            if(IsServerRunning) {
+                IsServerRunning = false;
                 listener.Stop();
                 listener.Close();
-                Logger.Info("Status of worker: {0}", worker.Status);
                 Logger.Info("Server is stopped");
             }
         }
