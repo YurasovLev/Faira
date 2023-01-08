@@ -1,5 +1,6 @@
 using System.Text;
 using System.Net;
+using System.Runtime.Caching;
 
 namespace Main {
     sealed class Server
@@ -7,18 +8,24 @@ namespace Main {
         private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
         private static readonly Task ServerWorker = new Task(Server.Worker);
         private static readonly HttpListener listener = new HttpListener();
+        private static readonly ObjectCache Cache = MemoryCache.Default;
+        private static readonly CacheItemPolicy CachePolicy = new();
         public static readonly string url = Program.ReadSetting("HOST_URL") ?? "http://localhost:1111/";
-        public static readonly string PathToHtml = Program.HtmlPath + "/Base.html";
-        public static string PageData = "<html><p>404</p></html>";
         public static bool IsServerRunning {get{return _IsServerRunning;} private set{_IsServerRunning=value;}}
         private static volatile bool _IsServerRunning = true;
 
         public static void Run()
         {
-            using (var stream = new StreamReader(PathToHtml)) {
-                PageData = stream.ReadToEnd();
-                stream.Close();
+            double minutes;
+            try {
+                minutes = double.Parse(Program.ReadSetting("CacheTime")??"30");
+            } catch(FormatException) {
+                Logger.Warn("CacheTime was not in a correct format. Set 30 minutes.");
+                minutes = 30;
             }
+            CachePolicy.SlidingExpiration = TimeSpan.FromMinutes(minutes);
+            Logger.Info("Cache time: {0}", minutes);
+            Logger.Info("Listening for connections on {0}", url);
             listener.Prefixes.Add(url);
             listener.Start();
 
@@ -29,7 +36,6 @@ namespace Main {
         ///</summary>
         private static void Worker() {
             Logger.Info("Server is running");
-            Logger.Info($"Listening for connections on {url}");
 
             Task<HttpListenerContext> ctx = listener.GetContextAsync();
             while (IsServerRunning)
@@ -58,35 +64,64 @@ namespace Main {
             if(ctx is null) throw new HttpRequestException("Context is null"); 
             HttpListenerRequest  req  = ctx.Request;
             HttpListenerResponse resp = ctx.Response;
+            try {
+                Logger.Debug("Data in Request\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}", req.HttpMethod, req.RawUrl, req.UserHostName, req.UserAgent);
+                if(req.RawUrl.EndsWith('/') || req.RawUrl.Contains("../") || string.IsNullOrWhiteSpace(req.RawUrl)) {
+                    Logger.Info("Bad request. Abort Responce.");
+                    resp.StatusCode = 400;
+                    resp.OutputStream.Close();
+                } else 
+                    switch(req.HttpMethod) {
+                    case "TRACE":
+                        Logger.Info("Output for: Trace");
+                        resp.ContentType = req.ContentType;
+                        resp.StatusCode = 200;
+                        resp.ContentEncoding = req.ContentEncoding;
+                        resp.ContentLength64 = req.ContentLength64;
+                        byte[] echodata = Encoding.UTF8.GetBytes("Echo");
+                        await resp.OutputStream.WriteAsync(echodata, 0, echodata.Length);
+                        break;
+                    case "GET":
+                        Logger.Info("Output for: Get");
+                        resp.ContentType = "text/html";
+                        resp.StatusCode = 200;
+                        resp.ContentEncoding = Encoding.UTF8;
+                        // Write the response info
+                        string? PageData = Cache[req.RawUrl] as string;
+                        if (PageData is null) {
+                            try {
+                                using (var stream = new StreamReader(Program.HtmlPath + req.RawUrl)) {
+                                    PageData = stream.ReadToEnd();
+                                    stream.Close();
+                                }
+                                Logger.Info("Caching \'{0}\'", req.RawUrl);
+                                Cache.Set(req.RawUrl, PageData, CachePolicy);
+                            } catch (UnauthorizedAccessException e) {
+                                Logger.Error("Access to read \"{0}\" denied", Program.HtmlPath+req.RawUrl);
+                                PageData = "500";
+                                resp.StatusCode = 500;
+                            } catch (Exception e) when (e is DirectoryNotFoundException || e is FileNotFoundException) {
+                                Logger.Info("{0} is not found.", req.RawUrl);
+                                PageData = "404";
+                                resp.StatusCode = 404;
+                            }
+                        }
+                        byte[] data = Encoding.UTF8.GetBytes(PageData ?? "500");
+                        resp.ContentLength64 = data.LongLength;
 
-            Logger.Debug("Data in Request\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}", req.HttpMethod, req.RawUrl, req.UserHostName, req.UserAgent);
-
-            switch(req.HttpMethod) {
-                case "TRACE":
-                    Logger.Info("Respone Trace");
-                    resp.ContentType = req.ContentType;
-                    resp.ContentEncoding = req.ContentEncoding;
-                    resp.ContentLength64 = req.ContentLength64;
-                    byte[] echodata = Encoding.UTF8.GetBytes("Echo");
-                    await resp.OutputStream.WriteAsync(echodata, 0, echodata.Length);
-                    resp.Close();
-                    break;
-                case "GET":
-                    Logger.Info("Respone Get");
-                    // Write the response info
-                    byte[] data = Encoding.UTF8.GetBytes(PageData);
-                    resp.ContentType = "text/html";
-                    resp.ContentEncoding = Encoding.UTF8;
-                    resp.ContentLength64 = data.LongLength;
-
-                    // Write out to the response stream (asynchronously), then close it
-                    await resp.OutputStream.WriteAsync(data, 0, data.Length);
-                    resp.Close();
-                    break;
-                default:
-                    Logger.Info("Abort Responce");
-                    resp.Abort();
-                    break;
+                        // Write out to the response stream (asynchronously), then close it
+                        await resp.OutputStream.WriteAsync(data, 0, data.Length);
+                        break;
+                    default:
+                        Logger.Info("Bad request. Abort Responce.");
+                        resp.StatusCode = 400;
+                        resp.OutputStream.Close();
+                        break;
+                }
+            } catch (Exception e) {
+                Logger.Error(e, "Error with processing request");
+            } finally {
+                resp.Close();
             }
         }
         ///<summary>
