@@ -14,7 +14,7 @@ namespace Main
         public static readonly string ConfigsPath = RootPath + ReadSetting("PathToConfigs");
         public static readonly string HtmlPath = RootPath + ReadSetting("PathToHtml");
         public static bool IsProgramRunning {get{return _IsProgramRunning;} private set{_IsProgramRunning=value;}}
-        private static volatile bool _IsProgramRunning = true;
+        private static volatile bool _IsProgramRunning = false;
         public static void Main(string[] Args) {
             Console.CancelKeyPress += new ConsoleCancelEventHandler(InterruptConfirmationRequest); // Требование подтверждения прерывания программы.
             NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(ConfigsPath+"/NLog.config"); // Подгружаем конфиг для NLog
@@ -24,14 +24,18 @@ namespace Main
             try {
                 Logger.Info("Program is running");
                 Server.Run();
-                Terminal.Run();
+                if(!Server.IsServerRunning) Logger.Fatal("Server did not start.");
+                else {
+                    IsProgramRunning = true;
+                    Terminal.Run();
+                }
             } 
             catch (Exception err) {
-                Logger.Fatal(err, "Error");
+                Logger.Fatal(err, "Exception when starting program.");
             }
             finally {
                 Server.Stop();
-                Logger.Info("Program is stopped");
+                Logger.Info("Program is stopped.");
                 NLog.LogManager.Shutdown();
             }
         }
