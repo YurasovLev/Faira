@@ -49,7 +49,7 @@ namespace Main {
                         Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent);
                     }
                     if(ctx.IsCompleted || ctx.IsCanceled) ctx = listener.GetContextAsync(); // Независимо от результата запускаем следующее ожидание.
-                    else Thread.Sleep(1); // Небольшая магическая задержка. Без неё сервер отвечает плохо (Если отвечает в принципе).
+                    else Thread.Sleep(500); // Небольшая магическая задержка. Без неё сервер отвечает плохо (Если отвечает в принципе).
                 } 
                 catch (HttpListenerException err){ Logger.Warn(err, "Error when update the requests"); }
                 catch (HttpRequestException err) { Logger.Warn(err, "Error when accepting the request"); }

@@ -31,7 +31,7 @@ namespace Main {
                                 Console.WriteLine("Enter \'help\' to see a list of all commands");
                             }
                         }
-                    }
+                    } else Thread.Sleep(500);
                 } catch (Exception err) {
                     Logger.Warn(err, "Exception during terminal operation");
                 }
