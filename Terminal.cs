@@ -4,16 +4,16 @@
 
 namespace Main {
     sealed class Terminal {
-        private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-        public static readonly Dictionary<string, Func<string[], int>> Commands = new Dictionary<string, Func<string[], int>>();
-        public static void Run() {
+        private readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+        public readonly Dictionary<string, Func<string[], int>> Commands = new Dictionary<string, Func<string[], int>>();
+        public Terminal() {
             Commands.Add("stop", (string[] args) => { Program.Stop(); return 0; });
             Commands.Add("echo", (string[] args) => { Console.WriteLine(string.Join(" ", args)); return 0; });
             Commands.Add("help", (string[] args) => { Console.WriteLine("Commands:"); foreach (string c in Commands.Keys) Console.WriteLine($"  {c}"); return 0; });
-            Commands.Add("readsetting", (string[] args) => { Logger.Info("Value: {0}", Program.ReadSetting(args[1])); return 0; });
-
-
-            while (Program.IsProgramRunning) {
+            Commands.Add("readsetting", (string[] args) => { Logger.Info("Value: {0}", Program.ReadSetting(Logger, args[1])); return 0; });
+        }
+        public void Run() {
+            while (Program.IsRunning) {
                 try {
                     if(Console.KeyAvailable) {
                         string text = (Console.ReadLine() ?? "").ToLower().Trim();

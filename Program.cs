@@ -1,4 +1,5 @@
 ﻿using System.Configuration;
+using System.Runtime.Caching;
 using NLog;
 
 /*
@@ -9,57 +10,97 @@ using NLog;
 namespace Main
 {
     sealed class Program {
-        private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
         public static readonly string RootPath = Path.GetFullPath(@".");
-        public static readonly string ConfigsPath = RootPath + ReadSetting("PathToConfigs");
-        public static readonly string HtmlPath = RootPath + ReadSetting("PathToHtml");
-        public static bool IsProgramRunning {get{return _IsProgramRunning;} private set{_IsProgramRunning=value;}}
-        private static volatile bool _IsProgramRunning = false;
+        public static string ConfigsPath = "";
+        public static string HtmlPath = "";
+        public static bool IsRunning {get{return _IsRunning;} private set{_IsRunning=value;}}
+        private static volatile bool _IsRunning = false;
+        public static double minutes;
         public static void Main(string[] Args) {
-            Console.CancelKeyPress += new ConsoleCancelEventHandler(InterruptConfirmationRequest); // Требование подтверждения прерывания программы.
-            NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(ConfigsPath+"/NLog.config"); // Подгружаем конфиг для NLog
+            NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+            ConfigsPath = RootPath + ReadSetting(Logger, "PathToConfigs");
+            HtmlPath = RootPath + ReadSetting(Logger, "PathToHtml");
 
-            
+
+            Console.CancelKeyPress += new ConsoleCancelEventHandler(InterruptConfirmationRequest); // Требование подтверждения прерывания программы.
+            NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(ConfigsPath + "/NLog.config"); // Подгружаем конфиг для NLog
+
+            var server = new Server();
+            var terminal = new Terminal();
+            var ServerTask = new Task(server.Run);
+            ServerTask.ContinueWith((Task t) => {t.Dispose();});
 
             try {
                 Logger.Info("Program is running");
-                Server.Run();
-                if(!Server.IsServerRunning) Logger.Fatal("Server did not start.");
-                else {
-                    IsProgramRunning = true;
-                    Terminal.Run();
-                }
+                ServerTask.Start();
+                IsRunning = true;
+                terminal.Run();
             } 
             catch (Exception err) {
                 Logger.Fatal(err, "Exception when starting program.");
             }
             finally {
-                Server.Stop();
+                server.Stop();
                 Logger.Info("Program is stopped.");
                 NLog.LogManager.Shutdown();
             }
         }
         public static void Stop() {
-            IsProgramRunning = false;
+            IsRunning = false;
         }
+        
         ///<summary>
         /// Если будет нажата комбинация CTRL+C спросить, уверен-ли пользователь в том, что хочет прервать программу.
         ///</summary>
         private static void InterruptConfirmationRequest(object? sender, ConsoleCancelEventArgs args)
         {
-            Logger.Info("Ctrl + C is pressed");
             Console.WriteLine("\nAre you sure you want to complete the program? [y/N]");
             if(Char.ToLower(Console.ReadKey().KeyChar) == 'y') {
-                Logger.Info("Killing program");
+                Console.WriteLine("Killing program");
             } else {
-                Logger.Info("Program continues work");
+                Console.WriteLine("Program continues work");
                 args.Cancel = true;
             }
         }
         ///<summary>
+        /// Читает файл. В случае отсутствия файла вернет null.
+        ///</summary>
+        public static object? ReadFile(string Path, NLog.Logger Logger) {
+            Logger.Info("\"{0}\" reading", Path);
+            object? Data = "";
+            try {
+                using (var stream = new StreamReader(Path)) {
+                    Data = stream.ReadToEnd();
+                    stream.Close();
+                }
+                Logger.Info("\"{0}\" is read", Path);
+            } catch (UnauthorizedAccessException) {
+                Logger.Error("Access to read \"{0}\" denied", Path);
+            } catch (Exception e) when (e is DirectoryNotFoundException || e is FileNotFoundException) {
+                Logger.Info("{0} is not found.", Path);
+            }
+            return Data;
+        }
+        ///<summary>
+        /// Читает файл и кэширует файл. В случае отсутствия файла вернет null.
+        ///</summary>
+        public static object? ReadFileInCache(string Path, NLog.Logger Logger, ObjectCache Cache, CacheItemPolicy cacheItemPolicy) {
+            Logger.Info("\'{0}\' search in cache", Path);
+            object? Data = Cache[Path];
+            if (Data is null) {
+                Logger.Info("\'{0}\' is missing in the cache. Read.", Path);
+                Data = ReadFile(Path, Logger);
+                if (!(Data is null)) {
+                    Logger.Info("\'{0}\' caching", Path);
+                    Cache.Set(Path, Data, cacheItemPolicy);
+                } else Logger.Info("\'{0}\' is null", Path);
+            }
+            return Data;
+        }
+        ///<summary>
         /// Метод для считывания данных из конфига App.config
         ///</summary>
-        public static string? ReadSetting(string key)  
+        public static string? ReadSetting(NLog.Logger Logger, string key)  
         {  
             try  
             {

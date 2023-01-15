@@ -5,78 +5,92 @@ using System.Runtime.Caching;
 namespace Main {
     sealed class Server
     {
-        private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-        private static readonly Task ServerWorker = new Task(Server.Worker);
-        private static readonly HttpListener listener = new HttpListener();
-        private static readonly ObjectCache Cache = MemoryCache.Default;
-        private static readonly CacheItemPolicy CachePolicy = new();
-        public static readonly string url = Program.ReadSetting("HOST_URL") ?? "http://localhost:1111/";
-        public static bool IsServerRunning {get{return _IsServerRunning;} private set{_IsServerRunning=value;}}
-        private static volatile bool _IsServerRunning = false;
+        private readonly ObjectCache Cache = MemoryCache.Default;
+        private readonly CacheItemPolicy cacheItemPolicy;
+        public readonly string url = "http://localhost:1111/";
+        public readonly int UpdateRequestTimeMS = 10; // Время между проверками появления нового запроса
+        public bool IsRunning {get{return _IsRunning;} private set{_IsRunning=value;}}
+        private volatile bool _IsRunning = false;
+        private HttpListener listener = new();
+        public Server() {
+            var Logger = NLog.LogManager.GetCurrentClassLogger();
 
-        public static void Run()
-        {
-            double minutes;
+        
+            url = Program.ReadSetting(Logger, "HOST_URL") ?? url;
+            listener.Prefixes.Add(url);
+
+
+            UpdateRequestTimeMS = int.Parse(Program.ReadSetting(Logger, "CheckRequestTimeMS") ?? "10");
+
+
+            double minutes = 30;
             try {
-                minutes = double.Parse(Program.ReadSetting("CacheTime")??"30");
+                minutes = double.Parse(Program.ReadSetting(Logger, "CacheTime") ?? "30");
             } catch(FormatException) {
                 Logger.Warn("CacheTime was not in a correct format. Set 30 minutes.");
-                minutes = 30;
             }
-            CachePolicy.SlidingExpiration = TimeSpan.FromMinutes(minutes);
             Logger.Info("Cache time: {0} minutes.", minutes);
-            Logger.Info("Listening for connections on {0}", url);
-            listener.Prefixes.Add(url);
+
+            cacheItemPolicy = new();
+            cacheItemPolicy.SlidingExpiration = TimeSpan.FromMinutes(minutes);
+            var SLogger = Logger; // Создано в целях избежания утечек памяти.
+            cacheItemPolicy.RemovedCallback += (CacheEntryRemovedArguments args) => {SLogger.Info($"Cache removed: \'{args.CacheItem.Key}\' by reason \"{args.RemovedReason}\"");};
+        }
+        public void Run()
+        {
+            var Logger = NLog.LogManager.GetCurrentClassLogger();
             try {
                 listener.Start();
-                ServerWorker.Start();
-                IsServerRunning = true;
+                Logger.Info("Listening for connections on {0}", url);
             } catch(HttpListenerException e) {
-                IsServerRunning = false;
                 if(e.ErrorCode == 98) Logger.Error("Address already in use. Change another address.");
-            } catch(Exception) {
-                IsServerRunning = false;
-                throw;
+                else throw;
+                Program.Stop();
+                return;
             }
-        }
-        ///<summary>
-        /// Метод принимающий запросы
-        ///</summary>
-        private static void Worker() {
+            IsRunning = true;
             Logger.Info("Server is running");
+            var ctx = listener.GetContextAsync();
+            try {
+                while (IsRunning)
+                {
+                    try {
+                        // Ждем пока не будет завершено ассинхронное получение контекста.
+                        if(ctx.IsCompletedSuccessfully) {
+                            // Если контекст успешно получен, отправляем его на обработку в отдельный поток.
+                            var result = ctx.Result;
+                            Logger.Info("Request received.");
+                            Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent);
+                            // result.Response.Close();
+                            ctx.Dispose();
 
-            Task<HttpListenerContext> ctx = listener.GetContextAsync();
-            while (IsServerRunning)
-            {
-                try {
-                    // Ждем пока не будет завершено ассинхронное получение контекста.
-                    if(ctx.IsCompletedSuccessfully) {
-                        // Если контекст успешно получен, отправляем его на обработку в отдельный поток.
-                        var result = ctx.GetAwaiter().GetResult();
-                        Logger.Info("Request received.");
-                        Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent);
-                    }
-                    if(ctx.IsCompleted || ctx.IsCanceled) ctx = listener.GetContextAsync(); // Независимо от результата запускаем следующее ожидание.
-                    else Thread.Sleep(10); // Небольшая магическая задержка. Без неё сервер отвечает плохо (Если отвечает в принципе).
-                } 
-                catch (HttpListenerException err){ Logger.Warn(err, "Error when update the requests"); }
-                catch (HttpRequestException err) { Logger.Warn(err, "Error when accepting the request"); }
+                            // Processing(result);
+                        }
+                        if(ctx.IsCompleted || ctx.IsCanceled) ctx = listener.GetContextAsync(); // Независимо от результата запускаем следующее ожидание.
+                        else Thread.Sleep(UpdateRequestTimeMS); // Задержка для снижения нагрузки.
+                    } 
+                    catch (HttpListenerException err) { Logger.Warn(err, "Error when update the requests");   }
+                    catch (HttpRequestException err)  { Logger.Warn(err, "Error when accepting the request"); }
+                }
+            } catch(Exception e) {
+                Logger.Fatal(e, "Fatal error during server worked");
+                Program.Stop();
             }
-            return;
         }
         ///<summary>
         /// Метод обрабатывающий запросы
         ///</summary>
-        private static async void Processing(object? obj) {
+        private void Processing(object? obj) {
+            var Logger = NLog.LogManager.GetCurrentClassLogger();
             int threadId = Thread.GetCurrentProcessorId();
             Logger.Info("Request({0}): Processing", threadId);
             HttpListenerContext? ctx = (HttpListenerContext?) obj;
-            if(ctx is null) throw new HttpRequestException("Context is null"); 
+            if(ctx is null) throw new HttpRequestException("Context is null");
             HttpListenerRequest  req  = ctx.Request;
             HttpListenerResponse resp = ctx.Response;
             try {
-                Logger.Debug("Data in Request ({4})\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}", req.HttpMethod, req.RawUrl, req.UserHostName, req.UserAgent, threadId);
-                if(req.RawUrl.EndsWith('/') || req.RawUrl.Contains("../") || string.IsNullOrWhiteSpace(req.RawUrl)) {
+                Logger.Debug("Data in Request ({4})\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}\nHeaders: {5}", req.HttpMethod, req.RawUrl, req.UserHostName, req.UserAgent, threadId, string.Join("; ", req.Headers.AllKeys));
+                if((req.RawUrl ?? "/").EndsWith('/') || (req.RawUrl ?? "../").Contains("../") || string.IsNullOrWhiteSpace(req.RawUrl)) {
                     Logger.Info("Bad request({0}). Abort Responce.", threadId);
                     resp.StatusCode = 400;
                     resp.OutputStream.Close();
@@ -89,37 +103,23 @@ namespace Main {
                             resp.ContentEncoding = req.ContentEncoding;
                             resp.ContentLength64 = req.ContentLength64;
                             byte[] echodata = Encoding.UTF8.GetBytes("Echo");
-                            await resp.OutputStream.WriteAsync(echodata, 0, echodata.Length);
+                            resp.OutputStream.Write(echodata, 0, echodata.Length);
                             break;
                         case "GET":
                             resp.ContentType = "text/html";
                             resp.StatusCode = 200;
                             resp.ContentEncoding = Encoding.UTF8;
-                            // Write the response info
-                            string? PageData = Cache[req.RawUrl] as string;
+                            var PageData = Program.ReadFileInCache(Program.HtmlPath+req.RawUrl, Logger, Cache, cacheItemPolicy);
                             if (PageData is null) {
-                                try {
-                                    using (var stream = new StreamReader(Program.HtmlPath + req.RawUrl)) {
-                                        PageData = stream.ReadToEnd();
-                                        stream.Close();
-                                    }
-                                    Logger.Info("Caching \'{0}\'", req.RawUrl);
-                                    Cache.Set(req.RawUrl, PageData, CachePolicy);
-                                } catch (UnauthorizedAccessException e) {
-                                    Logger.Error("Access to read \"{0}\" denied", Program.HtmlPath+req.RawUrl);
-                                    PageData = "500";
-                                    resp.StatusCode = 500;
-                                } catch (Exception e) when (e is DirectoryNotFoundException || e is FileNotFoundException) {
-                                    Logger.Info("{0} is not found.", req.RawUrl);
-                                    PageData = "404";
-                                    resp.StatusCode = 404;
-                                }
+                                resp.StatusCode = 404;
                             }
-                            byte[] data = Encoding.UTF8.GetBytes(PageData ?? "500");
+                            // Write the response info
+                            
+                            byte[] data = Encoding.UTF8.GetBytes(PageData as string ?? "404");
                             resp.ContentLength64 = data.LongLength;
 
                             // Write out to the response stream (asynchronously), then close it
-                            await resp.OutputStream.WriteAsync(data, 0, data.Length);
+                            resp.OutputStream.Write(data, 0, data.Length);
                             break;
                         default:
                             Logger.Info("Bad request({0}). Abort Responce.", threadId);
@@ -138,14 +138,18 @@ namespace Main {
         ///<summary>
         // Метод останавливающий сервер.
         ///</summary>
-        public static void Stop() {
+        public void Stop() {
+            var Logger = NLog.LogManager.GetCurrentClassLogger();
             Logger.Debug("Request to stop server");
-            if(IsServerRunning) {
-                IsServerRunning = false;
+            if(IsRunning) {
+                IsRunning = false;
                 listener.Stop();
                 listener.Close();
                 Logger.Info("Server is stopped");
             }
+        }
+        ~Server() {
+            Stop();
         }
     }
 }
