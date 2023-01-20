@@ -88,7 +88,7 @@ namespace Main
             Logger.Info("\'{0}\' search in cache", Path);
             object? Data = Cache[Path];
             if (Data is null) {
-                Logger.Info("\'{0}\' is missing in the cache. Read.", Path);
+                Logger.Info("\'{0}\' is missing. Read", Path);
                 Data = ReadFile(Path, Logger);
                 if (!(Data is null)) {
                     Logger.Info("\'{0}\' caching", Path);

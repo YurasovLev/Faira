@@ -1,6 +1,6 @@
 if ("WebSocket" in window) {
 
-  var ws = new WebSocket(`ws://${document.location.host}`);
+  var ws = new WebSocket(`ws://localhost:2021/`);
 
   ws.onopen = ()=>{
     console.log("Start WebSocket")
@@ -15,6 +15,6 @@ if ("WebSocket" in window) {
   }
 
   ws.onmessage = (message)=>{
-    console.log(message)
+    console.log(message.data)
   }
 } else alert("ERROR\nYour browser is not supported!")

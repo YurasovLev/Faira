@@ -1,22 +1,32 @@
 using System.Text;
 using System.Net;
 using System.Runtime.Caching;
+using WebSocketSharp.Server;
 
 namespace Main {
     sealed class Server
     {
         private readonly ObjectCache Cache = MemoryCache.Default;
         private readonly CacheItemPolicy cacheItemPolicy;
-        public readonly string url = "http://localhost:1111/";
+        public readonly string url = "localhost:1111";
+        public readonly string wsurl = "/ws";
+        private readonly static string protocol = "http://";
         public readonly int UpdateRequestTimeMS = 10; // Время между проверками появления нового запроса
         public bool IsRunning {get{return _IsRunning;} private set{_IsRunning=value;}}
         private volatile bool _IsRunning = false;
-        private HttpListener listener = new();
+        private HttpListener listener;
+        private WebSocketServer WSS; // Web Socket Server
         public Server() {
             var Logger = NLog.LogManager.GetCurrentClassLogger();
+            url = Program.ReadSetting(Logger, "HOST_URL") ?? url;
+            wsurl = Program.ReadSetting(Logger, "WSS_URL") ?? "/ws";
+
+            WSS = new(wsurl);
+            WSS.AddWebSocketService<ProcessingWebsocket>("/");
+            // webSocket.OnMessage += (sender, e) => Console.WriteLine(e);
 
         
-            url = Program.ReadSetting(Logger, "HOST_URL") ?? url;
+            listener = new();
             listener.Prefixes.Add(url);
 
 
@@ -40,6 +50,8 @@ namespace Main {
         {
             var Logger = NLog.LogManager.GetCurrentClassLogger();
             try {
+                WSS.Start();
+                Logger.Info("Listening for connections on {0}", wsurl);
                 listener.Start();
                 Logger.Info("Listening for connections on {0}", url);
             } catch(HttpListenerException e) {
@@ -60,7 +72,8 @@ namespace Main {
                             // Если контекст успешно получен, отправляем его на обработку в отдельный поток.
                             var result = ctx.Result;
                             Logger.Info("Request received.");
-                            Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent);
+                            if (!result.Request.IsWebSocketRequest) //Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent); 
+                                ThreadPool.QueueUserWorkItem(Processing, result);
                             // result.Response.Close();
                             ctx.Dispose();
 
@@ -78,7 +91,7 @@ namespace Main {
             }
         }
         ///<summary>
-        /// Метод обрабатывающий запросы
+        /// Метод обрабатывающий обычные запросы
         ///</summary>
         private void Processing(object? obj) {
             var Logger = NLog.LogManager.GetCurrentClassLogger();
@@ -89,7 +102,7 @@ namespace Main {
             HttpListenerRequest  req  = ctx.Request;
             HttpListenerResponse resp = ctx.Response;
             try {
-                Logger.Debug("Data in Request ({4})\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}\nHeaders: {5}", req.HttpMethod, req.RawUrl, req.UserHostName, req.UserAgent, threadId, string.Join("; ", req.Headers.AllKeys));
+                Logger.Debug("Data in Request ({4})\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}\nHeaders: {5}", req.HttpMethod, req.RawUrl, ctx.Request.RemoteEndPoint.ToString(), req.UserAgent, threadId, string.Join("; ", req.Headers.AllKeys));
                 if((req.RawUrl ?? "/").EndsWith('/') || (req.RawUrl ?? "../").Contains("../") || string.IsNullOrWhiteSpace(req.RawUrl)) {
                     Logger.Info("Bad request({0}). Abort Responce.", threadId);
                     resp.StatusCode = 400;
@@ -143,6 +156,7 @@ namespace Main {
             Logger.Debug("Request to stop server");
             if(IsRunning) {
                 IsRunning = false;
+                WSS.Stop();
                 listener.Stop();
                 listener.Close();
                 Logger.Info("Server is stopped");
