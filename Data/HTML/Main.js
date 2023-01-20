@@ -16,5 +16,11 @@ if ("WebSocket" in window) {
 
   ws.onmessage = (message)=>{
     console.log(message.data)
+    document.getElementById("Chat").textContent += message.data + "\n";
   }
 } else alert("ERROR\nYour browser is not supported!")
+
+function send(t) {
+  ws.send(t.value)
+  t.value = ""
+}

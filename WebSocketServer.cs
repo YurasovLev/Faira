@@ -4,25 +4,32 @@ using System.Text;
 
 namespace Main {
     public sealed class ProcessingWebsocket : WebSocketBehavior {
-        protected override void OnMessage (MessageEventArgs e) {
-            Processing(e);
+        // private List<WebSocket> sockets = new();
+        NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+        protected override void OnOpen()
+        {
+            base.OnOpen();
+            Logger.Info("Websocket({0}): Connected", ID);
+            Sessions.Broadcast(ID + " --{Connected}--");
+        }
+        protected override void OnClose(CloseEventArgs e)
+        {
+            base.OnClose(e);
+            Logger.Info("WebSocket({0}): Disconnected", ID);
+        }
+        protected override void OnMessage (MessageEventArgs msg) {
+            if(
+               msg is null || 
+               msg.Data.Contains(ID) || 
+               string.IsNullOrWhiteSpace(msg.Data)
+            )return;
+
+            Logger.Debug("Websocket({0}): Message \"{1}\"", ID, msg.Data);
+
+            Sessions.Broadcast(ID + ": " + msg.Data);
         }
         ///<summary>
         /// Метод обрабатывающий запросы WebSocket
         ///</summary>
-        private void Processing(object? obj) {
-            var msg = (MessageEventArgs?)obj;
-            if(msg is null) return;
-
-            var Logger = NLog.LogManager.GetCurrentClassLogger();
-            int threadId = Thread.GetCurrentProcessorId();
-            Logger.Info("Websocket({0}): Processing", threadId);
-
-            Logger.Info("Websocket({0}): Data = {1}", threadId, msg.Data);
-
-            Send(msg.Data);
-            
-            Logger.Info("Websocket({0}): Closed", threadId);
-        }
     } 
 }

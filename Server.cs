@@ -6,7 +6,7 @@ using WebSocketSharp.Server;
 namespace Main {
     sealed class Server
     {
-        private readonly ObjectCache Cache = MemoryCache.Default;
+        public readonly ObjectCache Cache = MemoryCache.Default;
         private readonly CacheItemPolicy cacheItemPolicy;
         public readonly string url = "localhost:1111";
         public readonly string wsurl = "/ws";
@@ -72,8 +72,9 @@ namespace Main {
                             // Если контекст успешно получен, отправляем его на обработку в отдельный поток.
                             var result = ctx.Result;
                             Logger.Info("Request received.");
-                            if (!result.Request.IsWebSocketRequest) //Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent); 
+                            if (!result.Request.IsWebSocketRequest) {//Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent); 
                                 ThreadPool.QueueUserWorkItem(Processing, result);
+                            }
                             // result.Response.Close();
                             ctx.Dispose();
 
