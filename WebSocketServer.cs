@@ -17,6 +17,16 @@ namespace Main {
             base.OnClose(e);
             Logger.Info("WebSocket({0}): Disconnected", ID);
         }
+        protected override void OnError(WebSocketSharp.ErrorEventArgs e)
+        {
+            Logger.Info(e.ToString());
+            Logger.Info(e.Message);
+            Logger.Info(e.Exception.ToString());
+            Logger.Info(e.Exception.Message);
+            Logger.Info(e.Exception.Source);
+            Logger.Info(e.Exception.Data.Keys.ToString());
+            Logger.Info(e.Exception.Data.Values.ToString());
+        }
         protected override void OnMessage (MessageEventArgs msg) {
             if(
                msg is null || 

@@ -22,6 +22,7 @@ namespace Main
             HtmlPath = RootPath + ReadSetting(Logger, "PathToHtml");
 
 
+
             Console.CancelKeyPress += new ConsoleCancelEventHandler(InterruptConfirmationRequest); // Требование подтверждения прерывания программы.
             NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(ConfigsPath + "/NLog.config"); // Подгружаем конфиг для NLog
 

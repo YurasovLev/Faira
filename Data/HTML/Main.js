@@ -1,6 +1,6 @@
 if ("WebSocket" in window) {
 
-  var ws = new WebSocket(`ws://localhost:2021/`);
+  var ws = new WebSocket(`wss://smokeofanarchy.ru/faira/wss`);
 
   ws.onopen = ()=>{
     console.log("Start WebSocket")
