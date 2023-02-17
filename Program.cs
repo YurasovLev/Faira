@@ -37,12 +37,12 @@ namespace Main
                 Logger.Warn("CacheTime was not in a correct format. Set 30 minutes.");
             }
 
-            var server = new Server(port, MemoryCache.Default, updateRequestTimeMS, checkSpamCountMSGS, minutes);
+            var DBCluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
+            var DBSession = DBCluster.Connect();
+            var server = new Server(port, MemoryCache.Default, DBSession, updateRequestTimeMS, checkSpamCountMSGS, minutes);
             var terminal = new Terminal(server);
             var ServerTask = new Task(server.Run);
-            var DBCluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
 
-            var DBSession = DBCluster.Connect();
             ServerTask.ContinueWith((Task t) => {t.Dispose();});
 
             try {

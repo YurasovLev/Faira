@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Net;
 using System.Runtime.Caching;
 using WebSocketSharp.Server;
+using Cassandra;
 
 namespace Main {
     sealed public class UserData {
@@ -21,11 +22,13 @@ namespace Main {
         private volatile bool _IsRunning = false;
         private HttpServer listener;
         private NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-        public Server(int port, ObjectCache cache, int updateRequestTimeMS, int checkSpamCountMSGS, double minutes) {
+        private ISession DBSession;
+        public Server(int port, ObjectCache cache, ISession dbSession, int updateRequestTimeMS, int checkSpamCountMSGS, double minutes) {
             Cache = cache;
             Port = port;
             CheckSpamCountMSGS = updateRequestTimeMS;
             CheckSpamCountMSGS = checkSpamCountMSGS;
+            DBSession = dbSession;
             // url = int.Parse(Program.ReadSetting(Logger, "PORT") ?? "2020");
 
             listener = new HttpServer (Port);
@@ -120,7 +123,13 @@ namespace Main {
                     if(userData is null) break;
                     Logger.Info("User: {0}", userData.name);
                     Logger.Info("Password: {0}", userData.password);
+                    var result = DBSession.Execute($"SELECT name FROM FAIRA.accounts WHERE name = '{userData.name}' ALLOW FILTERING;");
+                    if(result.Count() > 0) {
+                        res.StatusCode = (int)HttpStatusCode.NotAcceptable;
+                        break;
+                    }
                     res.StatusCode = (int)HttpStatusCode.Accepted;
+                    DBSession.Execute($"INSERT INTO FAIRA.accounts (id, characters, email, name, password) VALUES ({DBSession.Execute("SELECT id FROM FAIRA.accounts").Count()+1}, {"{}"}, '{userData.name+"@email.com"}', '{userData.name}', '{userData.password}');");
                     break;
                 default:
                     res.StatusCode = (int)HttpStatusCode.NotFound;

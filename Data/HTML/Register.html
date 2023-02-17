@@ -45,7 +45,7 @@
         xhr.open("POST", "/user-register");
         xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
         xhr.send(formData);
-        xhr.onreadystatechange = (ev) => {console.log(ev)}
+        xhr.onreadystatechange = (ev) => {console.log(ev.target.status)}
 
         // document.location.href = document.location.origin + "/Chat.html"
         return false;
