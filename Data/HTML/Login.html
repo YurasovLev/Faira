@@ -1,0 +1,30 @@
+<html>
+  <head>
+    <title>The test site</title>
+  </head>
+  <body>
+    <form>
+        <label for="user_name">Имя пользователя или почта:</label>
+        <label id="name_not" for="user_name" style="color:red"></label><br>
+        <input type="text" id="user_name" name="User_Name"><br>
+
+        <label for="password">Пароль:</label>
+        <label id="password_not" for="password" style="color:red"></label><br>
+        <input type="password" id="password" name="Password"><br>
+
+        <input type="button" name="Send" onclick="sendData(this)" value="Войти">
+    </form>
+  </body>
+  <!-- <script src="Main.js"></script> -->
+  <script>
+    function sendData(v) {
+        let name = document.getElementById("user_name").value
+        let password = document.getElementById("password").value
+        console.log("UserName:", name)
+        console.log("Password:", password)
+        document.getElementById("name_not").textContent = (name.length > 0 ? "" : "*Поле пустое!")
+        document.getElementById("password_not").textContent = (password.length > 0 ? "" : "*Поле пустое!")
+        if(name.length < 1 || password.length < 1)return;
+    }
+  </script>
+</html>

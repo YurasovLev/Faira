@@ -1,0 +1,60 @@
+<html>
+  <head>
+    <title>The test site</title>
+  </head>
+  <body>
+    <form id="my-form" onsubmit="return processForm(this)" >
+        <label for="login_name">Имя пользователя или почта:</label>
+        <label id="name_not" for="login_name" style="color:red"></label><br>
+        <input type="text" id="login_name" name="username"><br>
+
+        <label for="login_password">Пароль:</label>
+        <label id="password_not" for="login_password" style="color:red"></label><br>
+        <input type="password" id="login_password" name="password"><br>
+        
+        <label for="password2">Повторите пароль:</label>
+        <label id="password2_not" for="password2" style="color:red"></label><br>
+        <input type="password" id="password2" name="password2"><br>
+        
+        <button type="submit">Зарегистрироваться</button>
+    </form>
+  </body>
+  <!-- <script src="Main.js"></script> -->
+  <script>
+    function processForm(e) {
+        var localStorage = window.localStorage;
+        let name = e[0].value
+        let password = e[1].value
+        let password2= e[2].value
+        // console.log(e)
+        // console.log("UserName:", name)
+        // console.log("Password:", password)
+        // console.log("Password2:", password2)
+        document.getElementById("name_not").textContent = (name.length > 0 ? "" : "*Поле пустое!")
+        document.getElementById("password_not").textContent = (password.length > 0 ? "" : "*Поле пустое!")
+        document.getElementById("password2_not").textContent = (password2.length > 0 ? (password == password2 ? "" : "*Пароли не совпадают!") : "*Поле пустое!")
+        if(name.length < 1 || password.length < 1 || password2.length < 1 || password != password2) return false;
+        console.log("Send data");
+        localStorage.setItem("UserName", name)
+        localStorage.setItem("Password", password)
+        
+        var formData = JSON.stringify({
+          name, password
+        });
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/user-register");
+        xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
+        xhr.send(formData);
+        xhr.onreadystatechange = (ev) => {console.log(ev)}
+
+        // document.location.href = document.location.origin + "/Chat.html"
+        return false;
+    }
+    // var form = document.getElementById('my-form');
+    // if (form.attachEvent) {
+    //     form.attachEvent("submit", processForm);
+    // } else {
+    //     form.addEventListener("submit", processForm);
+    // }
+  </script>
+</html>

@@ -1,6 +1,7 @@
 ﻿using System.Configuration;
 using System.Runtime.Caching;
 using NLog;
+using Cassandra;
 
 /*
 Это главный класс, который осуществляет запуск и контроль за всеми остальными классами.
@@ -15,20 +16,33 @@ namespace Main
         public static string HtmlPath = "";
         public static bool IsRunning {get{return _IsRunning;} private set{_IsRunning=value;}}
         private static volatile bool _IsRunning = false;
-        public static double minutes;
         public static void Main(string[] Args) {
             NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-            ConfigsPath = RootPath + ReadSetting(Logger, "PathToConfigs");
-            HtmlPath = RootPath + ReadSetting(Logger, "PathToHtml");
+            ConfigsPath = ReadSetting(Logger, "PathToConfigs") ?? "";
+            HtmlPath = ReadSetting(Logger, "PathToHtml") ?? "";
 
 
 
             Console.CancelKeyPress += new ConsoleCancelEventHandler(InterruptConfirmationRequest); // Требование подтверждения прерывания программы.
-            NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(ConfigsPath + "/NLog.config"); // Подгружаем конфиг для NLog
+            NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(RootPath + ConfigsPath + "/NLog.config"); // Подгружаем конфиг для NLog
 
-            var server = new Server();
-            var terminal = new Terminal();
+            var port = int.Parse(Program.ReadSetting(Logger, "PORT") ?? "2020");
+            var updateRequestTimeMS = int.Parse(Program.ReadSetting(Logger, "CheckRequestTimeMS") ?? "10");
+            var checkSpamCountMSGS = int.Parse(Program.ReadSetting(Logger, "CheckSpamCountMSGS") ?? "10");
+            double minutes = 30;
+            try {
+                minutes = double.Parse(Program.ReadSetting(Logger, "CacheTime") ?? "30");
+                Logger.Info("Cache time: {0} minutes.", minutes);
+            } catch(FormatException) {
+                Logger.Warn("CacheTime was not in a correct format. Set 30 minutes.");
+            }
+
+            var server = new Server(port, MemoryCache.Default, updateRequestTimeMS, checkSpamCountMSGS, minutes);
+            var terminal = new Terminal(server);
             var ServerTask = new Task(server.Run);
+            var DBCluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
+
+            var DBSession = DBCluster.Connect();
             ServerTask.ContinueWith((Task t) => {t.Dispose();});
 
             try {
@@ -42,6 +56,7 @@ namespace Main
             }
             finally {
                 server.Stop();
+                DBCluster.Shutdown();
                 Logger.Info("Program is stopped.");
                 NLog.LogManager.Shutdown();
             }
@@ -66,9 +81,10 @@ namespace Main
         ///<summary>
         /// Читает файл. В случае отсутствия файла вернет null.
         ///</summary>
-        public static object? ReadFile(string Path, NLog.Logger Logger) {
+        public static string? ReadFile(string Path, NLog.Logger Logger) {
             Logger.Info("\"{0}\" reading", Path);
-            object? Data = "";
+            Path = RootPath + Path;
+            string? Data = "";
             try {
                 using (var stream = new StreamReader(Path)) {
                     Data = stream.ReadToEnd();
@@ -85,13 +101,13 @@ namespace Main
         ///<summary>
         /// Читает файл и кэширует файл. В случае отсутствия файла вернет null.
         ///</summary>
-        public static object? ReadFileInCache(string Path, NLog.Logger Logger, ObjectCache Cache, CacheItemPolicy cacheItemPolicy) {
+        public static string? ReadFileInCache(string Path, NLog.Logger Logger, ObjectCache Cache, CacheItemPolicy cacheItemPolicy) {
             Logger.Info("\'{0}\' search in cache", Path);
-            object? Data = Cache[Path];
+            string? Data = (string?)Cache[Path];
             if (Data is null) {
                 Logger.Info("\'{0}\' is missing. Read", Path);
                 Data = ReadFile(Path, Logger);
-                if (!(Data is null)) {
+                if (!string.IsNullOrWhiteSpace(Data)) {
                     Logger.Info("\'{0}\' caching", Path);
                     Cache.Set(Path, Data, cacheItemPolicy);
                 } else Logger.Info("\'{0}\' is null", Path);
@@ -116,5 +132,12 @@ namespace Main
                 return null;
             }
         } 
+        public static bool CheckSpam(string ID) {
+            var Cache = MemoryCache.Default;
+            int? count = (int?)Cache[ID];
+            Cache.Set(ID, (count??0)+1, Server.SpamPolicy);
+            // catch(NullReferenceException){Cache.Add(ID, 0, Server.SpamPolicy);}
+            return count >= Server.CheckSpamCountMSGS;
+        }
     }
 }

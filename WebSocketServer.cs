@@ -28,6 +28,11 @@ namespace Main {
             Logger.Info(e.Exception.Data.Values.ToString());
         }
         protected override void OnMessage (MessageEventArgs msg) {
+            if(Program.CheckSpam(ID)) {
+                Send("Too many messages");
+                Sessions.CloseSession(ID);
+                return;
+            }
             if(
                msg is null || 
                msg.Data.Contains(ID) || 

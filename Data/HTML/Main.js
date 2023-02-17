@@ -1,6 +1,6 @@
 if ("WebSocket" in window) {
-
-  var ws = new WebSocket(`wss://smokeofanarchy.ru/faira/wss`);
+  var localStorage = window.localStorage;
+  var ws = new WebSocket(`ws://${document.location.host}//WebSocket`);
 
   ws.onopen = ()=>{
     console.log("Start WebSocket")
@@ -8,6 +8,7 @@ if ("WebSocket" in window) {
 
   ws.onclose = ()=>{
     console.log("WebSocket close")
+    document.getElementById("Chat").textContent = "Disconnected from server\n" + document.getElementById("Chat").textContent;
   }
 
   ws.onerror = (err) => { 
@@ -16,7 +17,7 @@ if ("WebSocket" in window) {
 
   ws.onmessage = (message)=>{
     console.log(message.data)
-    document.getElementById("Chat").textContent += message.data + "\n";
+    document.getElementById("Chat").textContent = message.data + "\n" + document.getElementById("Chat").textContent;
   }
 } else alert("ERROR\nYour browser is not supported!")
 

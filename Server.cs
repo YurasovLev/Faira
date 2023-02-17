@@ -1,153 +1,135 @@
 using System.Text;
+using System.Text.Json;
 using System.Net;
 using System.Runtime.Caching;
 using WebSocketSharp.Server;
 
 namespace Main {
+    sealed public class UserData {
+        public string name {get; set;}
+        public string password {get; set;}
+    }
     sealed class Server
     {
-        public readonly ObjectCache Cache = MemoryCache.Default;
-        private readonly CacheItemPolicy cacheItemPolicy;
-        public readonly string url = "localhost:1111";
-        public readonly string wsurl = "/ws";
-        private readonly static string protocol = "http://";
-        public readonly int UpdateRequestTimeMS = 10; // Время между проверками появления нового запроса
+        public readonly ObjectCache Cache;
+        public static readonly CacheItemPolicy SpamPolicy = new();
+        public static readonly CacheItemPolicy cacheItemPolicy = new();
+        public static int UpdateRequestTimeMS = 10; // Время между проверками появления нового запроса
+        public static int CheckSpamCountMSGS = 10; // Сколько сообщений должно быть, что-бы канал считался спамом.
+        public readonly int Port; // Порт на котором запускается сервер
         public bool IsRunning {get{return _IsRunning;} private set{_IsRunning=value;}}
         private volatile bool _IsRunning = false;
-        private HttpListener listener;
-        private WebSocketServer WSS; // Web Socket Server
-        public Server() {
-            var Logger = NLog.LogManager.GetCurrentClassLogger();
-            url = Program.ReadSetting(Logger, "HOST_URL") ?? url;
-            wsurl = Program.ReadSetting(Logger, "WSS_URL") ?? "/ws";
+        private HttpServer listener;
+        private NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+        public Server(int port, ObjectCache cache, int updateRequestTimeMS, int checkSpamCountMSGS, double minutes) {
+            Cache = cache;
+            Port = port;
+            CheckSpamCountMSGS = updateRequestTimeMS;
+            CheckSpamCountMSGS = checkSpamCountMSGS;
+            // url = int.Parse(Program.ReadSetting(Logger, "PORT") ?? "2020");
 
-            WSS = new(wsurl);
-            WSS.AddWebSocketService<ProcessingWebsocket>("/");
-            // webSocket.OnMessage += (sender, e) => Console.WriteLine(e);
+            listener = new HttpServer (Port);
+            listener.AddWebSocketService<ProcessingWebsocket>("//WebSocket");
+            listener.Log.Level = WebSocketSharp.LogLevel.Fatal;
 
-        
-            listener = new();
-            listener.Prefixes.Add(url);
+            listener.OnGet += ProcessingGet;
+            listener.OnPost += ProcessingPost;
 
-
-            UpdateRequestTimeMS = int.Parse(Program.ReadSetting(Logger, "CheckRequestTimeMS") ?? "10");
-
-
-            double minutes = 30;
-            try {
-                minutes = double.Parse(Program.ReadSetting(Logger, "CacheTime") ?? "30");
-            } catch(FormatException) {
-                Logger.Warn("CacheTime was not in a correct format. Set 30 minutes.");
-            }
-            Logger.Info("Cache time: {0} minutes.", minutes);
-
-            cacheItemPolicy = new();
             cacheItemPolicy.SlidingExpiration = TimeSpan.FromMinutes(minutes);
             var SLogger = Logger; // Создано в целях избежания утечек памяти.
             cacheItemPolicy.RemovedCallback += (CacheEntryRemovedArguments args) => {SLogger.Info($"Cache removed: \'{args.CacheItem.Key}\' by reason \"{args.RemovedReason}\"");};
+
+            SpamPolicy.SlidingExpiration = TimeSpan.FromSeconds(1);
         }
         public void Run()
         {
-            var Logger = NLog.LogManager.GetCurrentClassLogger();
             try {
-                WSS.Start();
-                Logger.Info("Listening for connections on {0}", wsurl);
                 listener.Start();
-                Logger.Info("Listening for connections on {0}", url);
+                if (listener.IsListening) {
+                    Logger.Info("Server is running");
+                    Logger.Info("Listening on Port {0}, and providing WebSocket services:", listener.Port);
+                    foreach(var s in listener.WebSocketServices.Paths)Logger.Info("- {0}", s);
+                    IsRunning = true;
+                } else throw new Exception("Server don't started");
             } catch(HttpListenerException e) {
                 if(e.ErrorCode == 98) Logger.Error("Address already in use. Change another address.");
                 else throw;
                 Program.Stop();
                 return;
             }
-            IsRunning = true;
-            Logger.Info("Server is running");
-            var ctx = listener.GetContextAsync();
-            try {
-                while (IsRunning)
-                {
-                    try {
-                        // Ждем пока не будет завершено ассинхронное получение контекста.
-                        if(ctx.IsCompletedSuccessfully) {
-                            // Если контекст успешно получен, отправляем его на обработку в отдельный поток.
-                            var result = ctx.Result;
-                            Logger.Info("Request received.");
-                            if (!result.Request.IsWebSocketRequest) {//Task.Factory.StartNew(Processing, result, TaskCreationOptions.AttachedToParent); 
-                                ThreadPool.QueueUserWorkItem(Processing, result);
-                            }
-                            // result.Response.Close();
-                            ctx.Dispose();
-
-                            // Processing(result);
-                        }
-                        if(ctx.IsCompleted || ctx.IsCanceled) ctx = listener.GetContextAsync(); // Независимо от результата запускаем следующее ожидание.
-                        else Thread.Sleep(UpdateRequestTimeMS); // Задержка для снижения нагрузки.
-                    } 
-                    catch (HttpListenerException err) { Logger.Warn(err, "Error when update the requests");   }
-                    catch (HttpRequestException err)  { Logger.Warn(err, "Error when accepting the request"); }
-                }
-            } catch(Exception e) {
-                Logger.Fatal(e, "Fatal error during server worked");
-                Program.Stop();
+        }
+        public bool CheckSpam(HttpRequestEventArgs e) {
+            var req = e.Request;
+            if(Program.CheckSpam(e.Request.RemoteEndPoint.Address.ToString())) {
+                Logger.Debug("Spam request");
+                e.Response.StatusCode = (int) HttpStatusCode.TooManyRequests;
+                return true;
             }
+            return false;
         }
         ///<summary>
-        /// Метод обрабатывающий обычные запросы
+        /// Метод обрабатывающий запросы
         ///</summary>
-        private void Processing(object? obj) {
-            var Logger = NLog.LogManager.GetCurrentClassLogger();
-            int threadId = Thread.GetCurrentProcessorId();
-            Logger.Info("Request({0}): Processing", threadId);
-            HttpListenerContext? ctx = (HttpListenerContext?) obj;
-            if(ctx is null) throw new HttpRequestException("Context is null");
-            HttpListenerRequest  req  = ctx.Request;
-            HttpListenerResponse resp = ctx.Response;
-            try {
-                Logger.Debug("Data in Request ({4})\nMethod: {0}\nURL: {1}\nUserHostName: {2}\nUserAgent: {3}\nHeaders: {5}", req.HttpMethod, req.RawUrl, ctx.Request.RemoteEndPoint.ToString(), req.UserAgent, threadId, string.Join("; ", req.Headers.AllKeys));
-                if((req.RawUrl ?? "/").EndsWith('/') || (req.RawUrl ?? "../").Contains("../") || string.IsNullOrWhiteSpace(req.RawUrl)) {
-                    Logger.Info("Bad request({0}). Abort Responce.", threadId);
-                    resp.StatusCode = 400;
-                    resp.OutputStream.Close();
-                } else {
-                    Logger.Info("Request({1}): Request to \"{2}\" HttpMethod: \'{0}\'", req.HttpMethod, threadId, req.RawUrl);
-                    switch(req.HttpMethod) {
-                        case "TRACE":
-                            resp.ContentType = req.ContentType;
-                            resp.StatusCode = 200;
-                            resp.ContentEncoding = req.ContentEncoding;
-                            resp.ContentLength64 = req.ContentLength64;
-                            byte[] echodata = Encoding.UTF8.GetBytes("Echo");
-                            resp.OutputStream.Write(echodata, 0, echodata.Length);
-                            break;
-                        case "GET":
-                            resp.ContentType = "text/html";
-                            resp.StatusCode = 200;
-                            resp.ContentEncoding = Encoding.UTF8;
-                            var PageData = Program.ReadFileInCache(Program.HtmlPath+req.RawUrl, Logger, Cache, cacheItemPolicy);
-                            if (PageData is null) {
-                                resp.StatusCode = 404;
-                            }
-                            // Write the response info
-                            
-                            byte[] data = Encoding.UTF8.GetBytes(PageData as string ?? "404");
-                            resp.ContentLength64 = data.LongLength;
+        public void ProcessingGet(object? sender, HttpRequestEventArgs e) {
+            var req = e.Request;
+            if(CheckSpam(e))return;
+            if(req.IsWebSocketRequest)return;
+            var res = e.Response;
 
-                            // Write out to the response stream (asynchronously), then close it
-                            resp.OutputStream.Write(data, 0, data.Length);
-                            break;
-                        default:
-                            Logger.Info("Bad request({0}). Abort Responce.", threadId);
-                            resp.StatusCode = 400;
-                            resp.OutputStream.Close();
-                            break;
-                    }
-                }
-            } catch (Exception e) {
-                Logger.Error(e, "Error with processing request ({0})", threadId);
-            } finally {
-                resp.Close();
-                Logger.Info("Request({0}): Closed", threadId);
+            Logger.Info("Request to get \"{0}\"", e.Request.RawUrl);
+
+            var path = Program.HtmlPath + req.RawUrl;
+
+            byte[] contents = Encoding.UTF8.GetBytes(
+                (string?)Program.ReadFileInCache(path, Logger, Cache, cacheItemPolicy) ?? ""
+            );
+
+            if (contents.Length < 1) {
+                res.StatusCode = (int) HttpStatusCode.NotFound;
+
+                return;
             }
+
+            if (path.EndsWith (".html")) {
+                res.ContentType = "text/html";
+                res.ContentEncoding = Encoding.UTF8;
+            }
+            else if (path.EndsWith (".js")) {
+                res.ContentType = "application/javascript";
+                res.ContentEncoding = Encoding.UTF8;
+            }
+
+            res.ContentLength64 = contents.LongLength;
+
+            res.Close (contents, true);
+        }
+        public void ProcessingPost(object? sender, HttpRequestEventArgs e) {
+            var req = e.Request;
+            if(CheckSpam(e))return;
+            Logger.Info("Request to post \"{0}\"", e.Request.Url.AbsolutePath);
+            var res = e.Response;
+
+            byte[] buffer = new byte[req.ContentLength64];
+            req.InputStream.Read(buffer, 0, (int)req.ContentLength64);
+            string data = Encoding.Default.GetString(buffer);
+            Logger.Info(data);
+
+            switch(e.Request.Url.AbsolutePath) {
+                case "/user-register":
+                    UserData? userData = JsonSerializer.Deserialize<UserData>(data);
+                    if(userData is null) break;
+                    Logger.Info("User: {0}", userData.name);
+                    Logger.Info("Password: {0}", userData.password);
+                    res.StatusCode = (int)HttpStatusCode.Accepted;
+                    break;
+                default:
+                    res.StatusCode = (int)HttpStatusCode.NotFound;
+                    break;
+            }
+            res.Close();
+        }
+        public bool UserRegister(string name, string password) {
+            return true;
         }
         ///<summary>
         // Метод останавливающий сервер.
@@ -157,9 +139,7 @@ namespace Main {
             Logger.Debug("Request to stop server");
             if(IsRunning) {
                 IsRunning = false;
-                WSS.Stop();
                 listener.Stop();
-                listener.Close();
                 Logger.Info("Server is stopped");
             }
         }
