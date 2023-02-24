@@ -4,19 +4,21 @@
   </head>
   <body>
     <form id="my-form" onsubmit="return processForm(this)" >
+        <label id="title0" for="login_name" style="color:green"></label><br>
         <label for="login_name">Имя пользователя или почта:</label>
-        <label id="name_not" for="login_name" style="color:red"></label><br>
-        <input type="text" id="login_name" name="username"><br>
+        <label id="title1" for="login_name" style="color:red"></label><br>
+        <input type="text" id="login_name" name="username" maxlength="20"><br>
 
         <label for="login_password">Пароль:</label>
-        <label id="password_not" for="login_password" style="color:red"></label><br>
-        <input type="password" id="login_password" name="password"><br>
+        <label id="title2" for="login_password" style="color:red"></label><br>
+        <input type="password" id="login_password" name="password" maxlength="20"><br>
         
         <label for="password2">Повторите пароль:</label>
-        <label id="password2_not" for="password2" style="color:red"></label><br>
-        <input type="password" id="password2" name="password2"><br>
+        <label id="title3" for="password2" style="color:red"></label><br>
+        <input type="password" id="password2" name="password2" maxlength="20"><br>
         
         <button type="submit">Зарегистрироваться</button>
+        <a href="Login.html">Войти</a>
     </form>
   </body>
   <!-- <script src="Main.js"></script> -->
@@ -30,31 +32,40 @@
         // console.log("UserName:", name)
         // console.log("Password:", password)
         // console.log("Password2:", password2)
-        document.getElementById("name_not").textContent = (name.length > 0 ? "" : "*Поле пустое!")
-        document.getElementById("password_not").textContent = (password.length > 0 ? "" : "*Поле пустое!")
-        document.getElementById("password2_not").textContent = (password2.length > 0 ? (password == password2 ? "" : "*Пароли не совпадают!") : "*Поле пустое!")
-        if(name.length < 1 || password.length < 1 || password2.length < 1 || password != password2) return false;
+        document.getElementById("title1").textContent = (name.length > 0 ?      (name.length <= 20 ?     "" : "*Имя слишком длинное!")    : "*Поле пустое!")
+        document.getElementById("title2").textContent = (password.length > 0 ?  (password.length <= 20 ? "" : "*Пароль слишком длинный!") : "*Поле пустое!")
+        document.getElementById("title3").textContent = (password2.length > 0 ? (password == password2 ? "" : "*Пароли не совпадают!")    : "*Поле пустое!")
+        if(name.length < 1 || name.length > 20 || password.length < 1 || password.length > 20 || password != password2) return false;
         console.log("Send data");
-        localStorage.setItem("UserName", name)
-        localStorage.setItem("Password", password)
         
         var formData = JSON.stringify({
-          name, password
+          Name:name, Password:password
         });
         var xhr = new XMLHttpRequest();
         xhr.open("POST", "/user-register");
         xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
         xhr.send(formData);
-        xhr.onreadystatechange = (ev) => {console.log(ev.target.status)}
+        xhr.onreadystatechange = (ev) => {
+          console.log("Status of output: "+ev.target.status)
+          console.log(ev.target)
+          switch(ev.target.status) {
+            case 201:
+              localStorage.setItem("ID", ev.target.responseText)
+              document.getElementById("title0").textContent = "Пользователь успешно зарегистрирован! Через 3 секунды вы будете перенаправлены на главную страницу."
+              localStorage.setItem("UserName", name)
+              localStorage.setItem("Password", password)
+              setTimeout(() => {document.location.href = document.location.origin + "/Chat.html"}, 3000)
+              break
+            case 400:
+              document.getElementById("title1").textContent = "Неправильно введены данные пользователя!"
+              break
+            case 430:
+              document.getElementById("title1").textContent = "Пользователь с таким именем уже зарегистрирован!"
+              break
+          }
+        }
 
-        // document.location.href = document.location.origin + "/Chat.html"
         return false;
     }
-    // var form = document.getElementById('my-form');
-    // if (form.attachEvent) {
-    //     form.attachEvent("submit", processForm);
-    // } else {
-    //     form.addEventListener("submit", processForm);
-    // }
   </script>
 </html>

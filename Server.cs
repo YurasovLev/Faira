@@ -6,10 +6,6 @@ using WebSocketSharp.Server;
 using Cassandra;
 
 namespace Main {
-    sealed public class UserData {
-        public string name {get; set;}
-        public string password {get; set;}
-    }
     sealed class Server
     {
         public readonly ObjectCache Cache;
@@ -22,17 +18,17 @@ namespace Main {
         private volatile bool _IsRunning = false;
         private HttpServer listener;
         private NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-        private ISession DBSession;
-        public Server(int port, ObjectCache cache, ISession dbSession, int updateRequestTimeMS, int checkSpamCountMSGS, double minutes) {
+        private Librarian librarian;
+        public Server(int port, ObjectCache cache, Librarian _librain, int updateRequestTimeMS, int checkSpamCountMSGS, double minutes) {
             Cache = cache;
             Port = port;
             CheckSpamCountMSGS = updateRequestTimeMS;
             CheckSpamCountMSGS = checkSpamCountMSGS;
-            DBSession = dbSession;
+            librarian = _librain;
             // url = int.Parse(Program.ReadSetting(Logger, "PORT") ?? "2020");
 
             listener = new HttpServer (Port);
-            listener.AddWebSocketService<ProcessingWebsocket>("//WebSocket");
+            listener.AddWebSocketService<ProcessingWebsocket>("//WebSocket", () => new ProcessingWebsocket(librarian));
             listener.Log.Level = WebSocketSharp.LogLevel.Fatal;
 
             listener.OnGet += ProcessingGet;
@@ -40,7 +36,7 @@ namespace Main {
 
             cacheItemPolicy.SlidingExpiration = TimeSpan.FromMinutes(minutes);
             var SLogger = Logger; // Создано в целях избежания утечек памяти.
-            cacheItemPolicy.RemovedCallback += (CacheEntryRemovedArguments args) => {SLogger.Info($"Cache removed: \'{args.CacheItem.Key}\' by reason \"{args.RemovedReason}\"");};
+            cacheItemPolicy.RemovedCallback += (CacheEntryRemovedArguments args) => {SLogger.Debug($"Cache removed: \'{args.CacheItem.Key}\' by reason \"{args.RemovedReason}\"");};
 
             SpamPolicy.SlidingExpiration = TimeSpan.FromSeconds(1);
         }
@@ -79,32 +75,37 @@ namespace Main {
             if(req.IsWebSocketRequest)return;
             var res = e.Response;
 
-            Logger.Info("Request to get \"{0}\"", e.Request.RawUrl);
+            Logger.Info("Request to get \"{0}\"", req.Url.AbsolutePath);
+            switch(req.Url.AbsolutePath) {
+                default: {
+                    var path = Program.HtmlPath + req.RawUrl;
 
-            var path = Program.HtmlPath + req.RawUrl;
+                    byte[] contents = Encoding.UTF8.GetBytes(
+                        (string?)Program.ReadFileInCache(path, Logger, Cache, cacheItemPolicy) ?? ""
+                    );
 
-            byte[] contents = Encoding.UTF8.GetBytes(
-                (string?)Program.ReadFileInCache(path, Logger, Cache, cacheItemPolicy) ?? ""
-            );
+                    if (contents.Length < 1) {
+                        res.StatusCode = (int) HttpStatusCode.NotFound;
 
-            if (contents.Length < 1) {
-                res.StatusCode = (int) HttpStatusCode.NotFound;
+                        return;
+                    }
 
-                return;
+                    if (path.EndsWith (".html")) {
+                        res.ContentType = "text/html";
+                        res.ContentEncoding = Encoding.UTF8;
+                    }
+                    else if (path.EndsWith (".js")) {
+                        res.ContentType = "application/javascript";
+                        res.ContentEncoding = Encoding.UTF8;
+                    }
+
+                    res.ContentLength64 = contents.LongLength;
+
+                    res.Close (contents, true);
+                    break;
+                }
             }
 
-            if (path.EndsWith (".html")) {
-                res.ContentType = "text/html";
-                res.ContentEncoding = Encoding.UTF8;
-            }
-            else if (path.EndsWith (".js")) {
-                res.ContentType = "application/javascript";
-                res.ContentEncoding = Encoding.UTF8;
-            }
-
-            res.ContentLength64 = contents.LongLength;
-
-            res.Close (contents, true);
         }
         public void ProcessingPost(object? sender, HttpRequestEventArgs e) {
             var req = e.Request;
@@ -115,34 +116,59 @@ namespace Main {
             byte[] buffer = new byte[req.ContentLength64];
             req.InputStream.Read(buffer, 0, (int)req.ContentLength64);
             string data = Encoding.Default.GetString(buffer);
-            Logger.Info(data);
+            Logger.Debug("Data in request: {0}", data);
 
             switch(e.Request.Url.AbsolutePath) {
-                case "/user-register":
-                    UserData? userData = JsonSerializer.Deserialize<UserData>(data);
-                    if(userData is null) break;
-                    Logger.Info("User: {0}", userData.name);
-                    Logger.Info("Password: {0}", userData.password);
-                    var result = DBSession.Execute($"SELECT name FROM FAIRA.accounts WHERE name = '{userData.name}' ALLOW FILTERING;");
-                    if(result.Count() > 0) {
-                        res.StatusCode = (int)HttpStatusCode.NotAcceptable;
+                case "/login": {
+                    UserData userData = JsonSerializer.Deserialize<UserData>(data);
+                    UserData? user = librarian.GetUserByName(userData.Name);
+                    if(user is null || user.Value.Password != userData.Password) {
+                        res.StatusCode = (int)HttpStatusCode.NotFound;
                         break;
                     }
                     res.StatusCode = (int)HttpStatusCode.Accepted;
-                    DBSession.Execute($"INSERT INTO FAIRA.accounts (id, characters, email, name, password) VALUES ({DBSession.Execute("SELECT id FROM FAIRA.accounts").Count()+1}, {"{}"}, '{userData.name+"@email.com"}', '{userData.name}', '{userData.password}');");
+                    byte[] id = Encoding.UTF8.GetBytes(user.Value.ID);
+                    res.ContentLength64 = id.Length;
+                    res.OutputStream.Write(id, 0, id.Length);
                     break;
-                default:
-                    res.StatusCode = (int)HttpStatusCode.NotFound;
+                }
+                case "/user-check-by-name": {
+                    UserData user = JsonSerializer.Deserialize<UserData>(data);
+                    // Logger.Info("User: {0}", userDataToCheck.name);
+                    // Logger.Info("Password: {0}", userDataToCheck.password);
+                    if(librarian.CheckFoundOfUserByName(user.Name))res.StatusCode = (int)HttpStatusCode.OK;
+                    else res.StatusCode = (int)HttpStatusCode.NoContent;
                     break;
+                }
+                case "/user-check-by-id": {
+                    UserData user = JsonSerializer.Deserialize<UserData>(data);
+                    // Logger.Info("User: {0}", userDataToCheck.name);
+                    // Logger.Info("Password: {0}", userDataToCheck.password);
+                    if(librarian.CheckFoundOfUserByID(user.ID))res.StatusCode = (int)HttpStatusCode.OK;
+                    else res.StatusCode = (int)HttpStatusCode.NoContent;
+                    break;
+                }
+                case "/user-register": {
+                    UserData userData = JsonSerializer.Deserialize<UserData>(data);
+                    Logger.Debug("Register new user: {0} - \'{1}\'", userData.Name, userData.Password);
+                    res.StatusCode = (int)HttpStatusCode.Created;
+                    try {
+                        userData = librarian.RegisterUser(userData);
+                        byte[] id = Encoding.UTF8.GetBytes(userData.ID);
+                        res.ContentLength64 = id.Length;
+                        res.OutputStream.Write(id, 0, id.Length);
+                    } catch (ArgumentNullException) {res.StatusCode = (int)HttpStatusCode.BadRequest;
+                    } catch (ArgumentOutOfRangeException) {res.StatusCode = (int)HttpStatusCode.BadRequest;
+                    } catch (MemberAccessException) {res.StatusCode = 430;} //Пользователь уже зарегистрирован//
+                    break;
+                }
+                default: {
+                    res.StatusCode = (int)HttpStatusCode.NotImplemented;
+                    break;
+                }
             }
             res.Close();
         }
-        public bool UserRegister(string name, string password) {
-            return true;
-        }
-        ///<summary>
-        // Метод останавливающий сервер.
-        ///</summary>
         public void Stop() {
             var Logger = NLog.LogManager.GetCurrentClassLogger();
             Logger.Debug("Request to stop server");

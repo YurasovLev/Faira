@@ -3,28 +3,71 @@
     <title>The test site</title>
   </head>
   <body>
-    <form>
-        <label for="user_name">Имя пользователя или почта:</label>
-        <label id="name_not" for="user_name" style="color:red"></label><br>
-        <input type="text" id="user_name" name="User_Name"><br>
+    <form id="my-form" onsubmit="return processForm(this)" >
+        <label id="title0" for="login_name" style="color:green"></label><br>
+        <label for="login_name">Имя пользователя или почта:</label>
+        <label id="title1" for="login_name" style="color:red"></label><br>
+        <input type="text" id="login_name" name="username" maxlength="20"><br>
 
-        <label for="password">Пароль:</label>
-        <label id="password_not" for="password" style="color:red"></label><br>
-        <input type="password" id="password" name="Password"><br>
-
-        <input type="button" name="Send" onclick="sendData(this)" value="Войти">
+        <label for="login_password">Пароль:</label>
+        <label id="title2" for="login_password" style="color:red"></label><br>
+        <input type="password" id="login_password" name="password" maxlength="20"><br>
+        
+        <button type="submit">Войти</button>
+        <a href="Register.html">Зарегистрироваться</a>
     </form>
   </body>
   <!-- <script src="Main.js"></script> -->
   <script>
-    function sendData(v) {
-        let name = document.getElementById("user_name").value
-        let password = document.getElementById("password").value
-        console.log("UserName:", name)
-        console.log("Password:", password)
-        document.getElementById("name_not").textContent = (name.length > 0 ? "" : "*Поле пустое!")
-        document.getElementById("password_not").textContent = (password.length > 0 ? "" : "*Поле пустое!")
-        if(name.length < 1 || password.length < 1)return;
+    function processForm(e) {
+        var localStorage = window.localStorage;
+        let name = e[0].value
+        let password = e[1].value
+        // console.log(e)
+        // console.log("UserName:", name)
+        // console.log("Password:", password)
+        document.getElementById("title1").textContent = (name.length > 0 ?      (name.length <= 20 ?     "" : "*Имя слишком длинное!")    : "*Поле пустое!")
+        document.getElementById("title2").textContent = (password.length > 0 ?  (password.length <= 20 ? "" : "*Пароль слишком длинный!") : "*Поле пустое!")
+        if(name.length < 1 || name.length > 20 || password.length < 1 || password.length > 20) return false;
+        console.log("Send data");
+        
+        var formData = JSON.stringify({
+          Name:name
+        });
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/user-check-by-name");
+        xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
+        xhr.send(formData);
+        xhr.onreadystatechange = processing;
+        function processing(ev) {
+          console.log("Status of output: "+ev.target.status)
+          console.log(ev.target)
+          switch(ev.target.status) {
+            case 200:
+              formData = JSON.stringify({
+                Name:name, Password:password
+              });
+              var xhr = new XMLHttpRequest();
+              xhr.open("POST", "/login");
+              xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
+              xhr.onreadystatechange = processing;
+              xhr.send(formData);
+              break;
+            case 202:
+              localStorage.setItem("ID", ev.target.responseText)
+              document.getElementById("title0").textContent = "Вход выполнен успешно! Через 3 секунды вы будете перенаправлены на главную страницу."
+              localStorage.setItem("UserName", name)
+              localStorage.setItem("Password", password)
+              setTimeout(() => {document.location.href = document.location.origin + "/Chat.html"}, 3000)
+              break
+            case 204:
+            case 404:
+              document.getElementById("title1").textContent = "Неправильно введены данные пользователя!"
+              break
+          }
+        }
+
+        return false;
     }
   </script>
 </html>

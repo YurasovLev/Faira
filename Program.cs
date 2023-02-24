@@ -38,8 +38,8 @@ namespace Main
             }
 
             var DBCluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
-            var DBSession = DBCluster.Connect();
-            var server = new Server(port, MemoryCache.Default, DBSession, updateRequestTimeMS, checkSpamCountMSGS, minutes);
+            var librarian = new Librarian(DBCluster);
+            var server = new Server(port, MemoryCache.Default, librarian, updateRequestTimeMS, checkSpamCountMSGS, minutes);
             var terminal = new Terminal(server);
             var ServerTask = new Task(server.Run);
 
@@ -82,7 +82,7 @@ namespace Main
         /// Читает файл. В случае отсутствия файла вернет null.
         ///</summary>
         public static string? ReadFile(string Path, NLog.Logger Logger) {
-            Logger.Info("\"{0}\" reading", Path);
+            Logger.Debug("\"{0}\" reading", Path);
             Path = RootPath + Path;
             string? Data = "";
             try {
@@ -90,11 +90,11 @@ namespace Main
                     Data = stream.ReadToEnd();
                     stream.Close();
                 }
-                Logger.Info("\"{0}\" is read", Path);
+                Logger.Debug("\"{0}\" is read", Path);
             } catch (UnauthorizedAccessException) {
-                Logger.Error("Access to read \"{0}\" denied", Path);
+                Logger.Debug("Access to read \"{0}\" denied", Path);
             } catch (Exception e) when (e is DirectoryNotFoundException || e is FileNotFoundException) {
-                Logger.Info("{0} is not found.", Path);
+                Logger.Debug("{0} is not found.", Path);
             }
             return Data;
         }
@@ -102,15 +102,15 @@ namespace Main
         /// Читает файл и кэширует файл. В случае отсутствия файла вернет null.
         ///</summary>
         public static string? ReadFileInCache(string Path, NLog.Logger Logger, ObjectCache Cache, CacheItemPolicy cacheItemPolicy) {
-            Logger.Info("\'{0}\' search in cache", Path);
+            Logger.Debug("\'{0}\' search in cache", Path);
             string? Data = (string?)Cache[Path];
             if (Data is null) {
-                Logger.Info("\'{0}\' is missing. Read", Path);
+                Logger.Debug("\'{0}\' is missing. Read", Path);
                 Data = ReadFile(Path, Logger);
                 if (!string.IsNullOrWhiteSpace(Data)) {
-                    Logger.Info("\'{0}\' caching", Path);
+                    Logger.Debug("\'{0}\' caching", Path);
                     Cache.Set(Path, Data, cacheItemPolicy);
-                } else Logger.Info("\'{0}\' is null", Path);
+                } else Logger.Debug("\'{0}\' is null", Path);
             }
             return Data;
         }
@@ -139,5 +139,23 @@ namespace Main
             // catch(NullReferenceException){Cache.Add(ID, 0, Server.SpamPolicy);}
             return count >= Server.CheckSpamCountMSGS;
         }
+        /// <summary>
+        ///     Resolves the time of which the snowflake is generated.
+        /// </summary>
+        /// <param name="value">The snowflake identifier to resolve.</param>
+        /// <returns>
+        ///     A <see cref="DateTimeOffset" /> representing the time for when the object is generated.
+        /// </returns>
+        public static DateTimeOffset FromSnowflake(string value)
+            => DateTimeOffset.FromUnixTimeMilliseconds((long)((ulong.Parse(value) >> 22) + 1420070400000UL));
+        /// <summary>
+        ///     Generates a pseudo-snowflake identifier with a <see cref="DateTimeOffset"/>.
+        /// </summary>
+        /// <param name="value">The time to be used in the new snowflake.</param>
+        /// <returns>
+        ///     A <see cref="UInt64" /> representing the newly generated snowflake identifier.
+        /// </returns>
+        public static string ToSnowflake(DateTimeOffset value) 
+            => (((ulong)value.ToUnixTimeMilliseconds() - 1420070400000UL) << 22).ToString();
     }
 }
