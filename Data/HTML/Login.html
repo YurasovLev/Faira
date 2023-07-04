@@ -14,7 +14,7 @@
         <input type="password" id="login_password" name="password" maxlength="20"><br>
         
         <button type="submit">Войти</button>
-        <a href="Register.html">Зарегистрироваться</a>
+    <a href="Register.html">Зарегистрироваться</a>
     </form>
   </body>
   <!-- <script src="Main.js"></script> -->
@@ -35,7 +35,7 @@
           Name:name
         });
         var xhr = new XMLHttpRequest();
-        xhr.open("POST", "/user-check-by-name");
+        xhr.open("POST", "/user-check-by-name-or-email");
         xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
         xhr.send(formData);
         xhr.onreadystatechange = processing;
@@ -45,7 +45,7 @@
           switch(ev.target.status) {
             case 200:
               formData = JSON.stringify({
-                Name:name, Password:password
+                ID:name, Password:password
               });
               var xhr = new XMLHttpRequest();
               xhr.open("POST", "/login");
@@ -55,10 +55,10 @@
               break;
             case 202:
               localStorage.setItem("ID", ev.target.responseText)
-              document.getElementById("title0").textContent = "Вход выполнен успешно! Через 3 секунды вы будете перенаправлены на главную страницу."
               localStorage.setItem("UserName", name)
               localStorage.setItem("Password", password)
-              setTimeout(() => {document.location.href = document.location.origin + "/Chat.html"}, 3000)
+              document.getElementById("title0").textContent = "Вход выполнен успешно!"
+              setTimeout(()=>document.location.href = document.location.origin + "/Chat.html",0);
               break
             case 204:
             case 404:

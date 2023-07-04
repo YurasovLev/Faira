@@ -20,6 +20,8 @@ namespace Main
             NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
             ConfigsPath = ReadSetting(Logger, "PathToConfigs") ?? "";
             HtmlPath = ReadSetting(Logger, "PathToHtml") ?? "";
+            string MailAddress = ReadSetting(Logger, "Mail") ?? "Null";
+            string MailPassword = ReadSetting(Logger, "MailPassword") ?? "Null";
 
 
 
@@ -39,7 +41,7 @@ namespace Main
 
             var DBCluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
             var librarian = new Librarian(DBCluster);
-            var server = new Server(port, MemoryCache.Default, librarian, updateRequestTimeMS, checkSpamCountMSGS, minutes);
+            var server = new Server(port, MemoryCache.Default, librarian, updateRequestTimeMS, checkSpamCountMSGS, minutes, MailAddress, MailPassword);
             var terminal = new Terminal(server);
             var ServerTask = new Task(server.Run);
 

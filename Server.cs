@@ -4,6 +4,8 @@ using System.Net;
 using System.Runtime.Caching;
 using WebSocketSharp.Server;
 using Cassandra;
+using MimeKit;
+using MailKit.Net.Smtp;
 
 namespace Main {
     sealed class Server
@@ -19,12 +21,19 @@ namespace Main {
         private HttpServer listener;
         private NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
         private Librarian librarian;
-        public Server(int port, ObjectCache cache, Librarian _librain, int updateRequestTimeMS, int checkSpamCountMSGS, double minutes) {
+        private string MailAddress;
+        private string MailPassword;
+        private SmtpClient MailClient;
+        public Server(int port, ObjectCache cache, Librarian _librain, int updateRequestTimeMS, int checkSpamCountMSGS, double minutes, string mailAddress, string mailPassword) {
             Cache = cache;
             Port = port;
             CheckSpamCountMSGS = updateRequestTimeMS;
             CheckSpamCountMSGS = checkSpamCountMSGS;
             librarian = _librain;
+            MailAddress = mailAddress;
+            MailPassword = mailPassword;
+
+            MailClient = new();
             // url = int.Parse(Program.ReadSetting(Logger, "PORT") ?? "2020");
 
             listener = new HttpServer (Port);
@@ -43,6 +52,10 @@ namespace Main {
         public void Run()
         {
             try {
+                MailClient.Connect("smtp.gmail.com", 587, false);
+                Logger.Info("Mail connected");
+                MailClient.Authenticate(MailAddress, MailPassword);
+                Logger.Info("Mail authenticate");
                 listener.Start();
                 if (listener.IsListening) {
                     Logger.Info("Server is running");
@@ -77,34 +90,35 @@ namespace Main {
 
             Logger.Info("Request to get \"{0}\"", req.Url.AbsolutePath);
             switch(req.Url.AbsolutePath) {
-                default: {
-                    var path = Program.HtmlPath + req.RawUrl;
-
-                    byte[] contents = Encoding.UTF8.GetBytes(
-                        (string?)Program.ReadFileInCache(path, Logger, Cache, cacheItemPolicy) ?? ""
-                    );
-
-                    if (contents.Length < 1) {
-                        res.StatusCode = (int) HttpStatusCode.NotFound;
-
-                        return;
-                    }
-
-                    if (path.EndsWith (".html")) {
-                        res.ContentType = "text/html";
-                        res.ContentEncoding = Encoding.UTF8;
-                    }
-                    else if (path.EndsWith (".js")) {
-                        res.ContentType = "application/javascript";
-                        res.ContentEncoding = Encoding.UTF8;
-                    }
-
-                    res.ContentLength64 = contents.LongLength;
-
-                    res.Close (contents, true);
+                case "/user-register-from": {
+                    Logger.Info(req.Url.Query.Substring(8));
                     break;
                 }
             }
+            var path = Program.HtmlPath + req.Url.AbsolutePath;
+
+            byte[] contents = Encoding.UTF8.GetBytes(
+                (string?)Program.ReadFileInCache(path, Logger, Cache, cacheItemPolicy) ?? ""
+            );
+
+            if (contents.Length < 1) {
+                res.StatusCode = (int) HttpStatusCode.NotFound;
+
+                return;
+            }
+
+            if (path.EndsWith (".html")) {
+                res.ContentType = "text/html";
+                res.ContentEncoding = Encoding.UTF8;
+            }
+            else if (path.EndsWith (".js")) {
+                res.ContentType = "application/javascript";
+                res.ContentEncoding = Encoding.UTF8;
+            }
+
+            res.ContentLength64 = contents.LongLength;
+
+            res.Close (contents, true);
 
         }
         public void ProcessingPost(object? sender, HttpRequestEventArgs e) {
@@ -120,8 +134,9 @@ namespace Main {
 
             switch(e.Request.Url.AbsolutePath) {
                 case "/login": {
-                    UserData userData = JsonSerializer.Deserialize<UserData>(data);
-                    UserData? user = librarian.GetUserByName(userData.Name);
+                    LoginData userData = JsonSerializer.Deserialize<LoginData>(data);
+                    UserData? user = librarian.GetUserByName(userData.ID);
+                    if(user is null)user = librarian.GetUserByEmail(userData.ID);
                     if(user is null || user.Value.Password != userData.Password) {
                         res.StatusCode = (int)HttpStatusCode.NotFound;
                         break;
@@ -132,12 +147,14 @@ namespace Main {
                     res.OutputStream.Write(id, 0, id.Length);
                     break;
                 }
-                case "/user-check-by-name": {
+                case "/user-check-by-name-or-email": {
                     UserData user = JsonSerializer.Deserialize<UserData>(data);
                     // Logger.Info("User: {0}", userDataToCheck.name);
                     // Logger.Info("Password: {0}", userDataToCheck.password);
-                    if(librarian.CheckFoundOfUserByName(user.Name))res.StatusCode = (int)HttpStatusCode.OK;
-                    else res.StatusCode = (int)HttpStatusCode.NoContent;
+                    if(librarian.CheckFoundOfUserByName(user.Name) || librarian.CheckFoundOfUserByEmail(user.Name))
+                        res.StatusCode = (int)HttpStatusCode.OK;
+                    else 
+                        res.StatusCode = (int)HttpStatusCode.NoContent;
                     break;
                 }
                 case "/user-check-by-id": {
@@ -151,15 +168,59 @@ namespace Main {
                 case "/user-register": {
                     UserData userData = JsonSerializer.Deserialize<UserData>(data);
                     Logger.Debug("Register new user: {0} - \'{1}\'", userData.Name, userData.Password);
-                    res.StatusCode = (int)HttpStatusCode.Created;
+                    res.StatusCode = (int)HttpStatusCode.Processing;
                     try {
-                        userData = librarian.RegisterUser(userData);
-                        byte[] id = Encoding.UTF8.GetBytes(userData.ID);
-                        res.ContentLength64 = id.Length;
-                        res.OutputStream.Write(id, 0, id.Length);
+                        string ticket = librarian.CreateRequestToRegisterEmail(userData);
+                        using var emailMessage = new MimeMessage();
+                        emailMessage.From.Add(new MailboxAddress("Администрация Faira", MailAddress));
+                        emailMessage.To.Add(new MailboxAddress("", userData.Email));
+                        emailMessage.Subject = "Подтвердите регистрацию.";
+                        emailMessage.Body = new TextPart(MimeKit.Text.TextFormat.Html)
+                        {
+                            Text = "<p>Это автоматическое сообщение, пожалуйста, не отвечайте на него.</p>"
+                            + $"<a href='{req.Url.Scheme}://{req.Url.Host}{(":"+req.Url.Port)}/user-register-from.html?ticket={ticket}'>Подтвердить регистрацию</a>\n"
+                        };
+                        MailClient.Send(emailMessage);
+                        Logger.Debug("The letter has been sent to the email: {0}", userData.Email);
+                        res.StatusCode = (int)HttpStatusCode.Created;
+                    } catch (ArgumentNullException) {res.StatusCode = (int)HttpStatusCode.BadRequest;
+                    } catch (ArgumentOutOfRangeException) {res.StatusCode = (int)HttpStatusCode.BadRequest;
+                    } catch (MethodAccessException) {res.StatusCode = (int)HttpStatusCode.Forbidden;
+                    } catch (MemberAccessException) {res.StatusCode = 430;} //Пользователь уже зарегистрирован//
+                    catch(Exception err) {Logger.Error(err, "Error when creating a registration request");res.StatusCode=(int)HttpStatusCode.InternalServerError;}
+                    break;
+                }
+                case "/user-register-confirmation": {
+                    RegisterDataConfirmation userData = JsonSerializer.Deserialize<RegisterDataConfirmation>(data);
+                    Logger.Debug("Confirmation user: {0} - \'{1}\'", userData.Ticket, userData.Email);
+                    res.StatusCode = (int)HttpStatusCode.Processing;
+                    if(librarian.RegisterUser(userData.Ticket) != null)
+                        res.StatusCode = (int)HttpStatusCode.Created;
+                    else res.StatusCode = (int)HttpStatusCode.BadRequest;
+                    break;
+                }
+                case "/resend-letter": {
+                    RegisterDataConfirmation userData = JsonSerializer.Deserialize<RegisterDataConfirmation>(data);
+                    Logger.Debug("Resend letter for email \'{0}\'", userData.Email);
+                    string ticket = librarian.GetRequestToRegisterEmail(userData.Email);
+                    res.StatusCode = (int)HttpStatusCode.Processing;
+                    try {
+                        using var emailMessage = new MimeMessage();
+                        emailMessage.From.Add(new MailboxAddress("Администрация Faira", MailAddress));
+                        emailMessage.To.Add(new MailboxAddress("", userData.Email));
+                        emailMessage.Subject = "Подтвердите регистрацию.";
+                        emailMessage.Body = new TextPart(MimeKit.Text.TextFormat.Html)
+                        {
+                            Text = "<p>Это автоматическое сообщение, пожалуйста, не отвечайте на него.</p>"
+                            + $"<a href='{req.Url.Scheme}://{req.Url.Host}{(":"+req.Url.Port)}/user-register-from.html?ticket={ticket}'>Подтвердить регистрацию</a>\n"
+                        };
+                        MailClient.Send(emailMessage);
+                        Logger.Debug("The letter has been sent to the email: {0}", userData.Email);
+                        res.StatusCode = (int)HttpStatusCode.Created;
                     } catch (ArgumentNullException) {res.StatusCode = (int)HttpStatusCode.BadRequest;
                     } catch (ArgumentOutOfRangeException) {res.StatusCode = (int)HttpStatusCode.BadRequest;
                     } catch (MemberAccessException) {res.StatusCode = 430;} //Пользователь уже зарегистрирован//
+                    catch(Exception err) {Logger.Error(err, "Error when resend letter"); res.StatusCode=(int)HttpStatusCode.InternalServerError;}
                     break;
                 }
                 default: {
@@ -174,6 +235,8 @@ namespace Main {
             Logger.Debug("Request to stop server");
             if(IsRunning) {
                 IsRunning = false;
+                MailClient.Disconnect(true);
+                MailClient.Dispose();
                 listener.Stop();
                 Logger.Info("Server is stopped");
             }

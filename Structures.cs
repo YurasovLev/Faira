@@ -5,6 +5,12 @@ namespace Main {
         public string Name {get; set;}
         public string Password {get; set;}
         public string Email {get; set;}
+        public UserData(string id, string email, string name, string password) {ID=id;Email=email;Name=name;Password=password;}
+    }
+    public struct RegisterDataConfirmation
+    {
+        public string Email {get; set;}
+        public string Ticket {get; set;}
     }
     public struct Message {
         public string Content {get; set;}

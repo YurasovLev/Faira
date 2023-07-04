@@ -1,0 +1,41 @@
+<html>
+  <head>
+    <title>Faira</title>
+  </head>
+    <label id="title0">Ожидаем ответ.</label>
+    <a href="Login.html" id="href1" hidden="true">Войти</a>
+    <a href="Register.html" id="href2" hidden="true">Зарегистрироваться</a>
+  </body>
+  <script>
+    let ticket = document.location.search.slice(8);
+    console.log("Ticket: "+ticket);
+    var formData = JSON.stringify({
+      Email:localStorage.getItem("Email"),
+      Ticket:ticket
+    });
+    if(!formData.Name || !formData.Password || !formData.Email) {
+      console.log("Incomplete data")
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", "/user-register-confirmation");
+    xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
+    xhr.send(formData);
+    xhr.onreadystatechange = (ev) => {
+      console.log("Status of output: "+ev.target.status)
+      console.log(ev.target)
+      switch(ev.target.status) {
+        case 102:
+          document.getElementById("title0").textContent = "Запрос в обработке, ожидайте результат."
+          break
+        case 400:
+          document.getElementById("title0").textContent = "Данные неправильные! Попробуйте зарегистрироваться еще раз."
+          document.getElementById("href2").hidden = false;
+          break
+        case 201:
+          document.getElementById("title0").textContent = "Регистрация прошла успешно! Пожалуйста, войдите."
+          document.getElementById("href1").hidden = false;
+          break
+      }
+    }
+  </script>
+</html>

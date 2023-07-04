@@ -5,41 +5,78 @@
   <body>
     <form id="my-form" onsubmit="return processForm(this)" >
         <label id="title0" for="login_name" style="color:green"></label><br>
-        <label for="login_name">Имя пользователя или почта:</label>
+        <label for="login_name">Имя пользователя:</label>
         <label id="title1" for="login_name" style="color:red"></label><br>
         <input type="text" id="login_name" name="username" maxlength="20"><br>
+        
+        <label for="email">Почта:</label>
+        <label id="title2" for="email" style="color:red"></label><br>
+        <input type="email" id="email" name="email" maxlength="20"><br>
 
         <label for="login_password">Пароль:</label>
-        <label id="title2" for="login_password" style="color:red"></label><br>
+        <label id="title3" for="login_password" style="color:red"></label><br>
         <input type="password" id="login_password" name="password" maxlength="20"><br>
         
         <label for="password2">Повторите пароль:</label>
-        <label id="title3" for="password2" style="color:red"></label><br>
+        <label id="title4" for="password2" style="color:red"></label><br>
         <input type="password" id="password2" name="password2" maxlength="20"><br>
         
         <button type="submit">Зарегистрироваться</button>
-        <a href="Login.html">Войти</a>
-    </form>
+      </form>
+      <a href="Login.html">Войти</a><br>
+      <button id="resend" hidden="true" onclick="return resendLetter()">Отправить письмо еще раз.</button>
   </body>
   <!-- <script src="Main.js"></script> -->
   <script>
+    function resendLetter(e) {
+      console.log("Post request to resend letter");
+      let email = localStorage.getItem("Email");
+      
+      var formData = JSON.stringify({
+        Name:"", Password:"", Email:email
+      });
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", "/resend-letter");
+      xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
+      xhr.send(formData);
+      xhr.onreadystatechange = (ev) => {
+        console.log("Status of output: "+ev.target.status)
+        console.log(ev.target)
+        switch(ev.target.status) {
+          case 201:
+            document.getElementById("title0").textContent = "На указанную почту направлено письмо с ссылкой для подтверждения аккаунта."
+            break
+          case 400:
+            document.getElementById("title1").textContent = "Неправильно введены данные пользователя!"
+            break
+          case 430:
+            document.getElementById("title1").textContent = "Пользователь с таким именем уже зарегистрирован!"
+            break
+        }
+      }
+
+      return false;
+    }
     function processForm(e) {
         var localStorage = window.localStorage;
         let name = e[0].value
-        let password = e[1].value
-        let password2= e[2].value
+        let email = e[1].value
+        let password = e[2].value
+        let password2= e[3].value
         // console.log(e)
         // console.log("UserName:", name)
+        // console.log("Email:", email)
         // console.log("Password:", password)
         // console.log("Password2:", password2)
         document.getElementById("title1").textContent = (name.length > 0 ?      (name.length <= 20 ?     "" : "*Имя слишком длинное!")    : "*Поле пустое!")
-        document.getElementById("title2").textContent = (password.length > 0 ?  (password.length <= 20 ? "" : "*Пароль слишком длинный!") : "*Поле пустое!")
-        document.getElementById("title3").textContent = (password2.length > 0 ? (password == password2 ? "" : "*Пароли не совпадают!")    : "*Поле пустое!")
-        if(name.length < 1 || name.length > 20 || password.length < 1 || password.length > 20 || password != password2) return false;
+        document.getElementById("title2").textContent = (email.length > 0 ?  (email.length <= 20 ? "" : "*Почта слишком длинная!") : "*Поле пустое!")
+        document.getElementById("title3").textContent = (password.length > 0 ?  (password.length <= 20 ? "" : "*Пароль слишком длинный!") : "*Поле пустое!")
+        document.getElementById("title4").textContent = (password2.length > 0 ? (password == password2 ? "" : "*Пароли не совпадают!")    : "*Поле пустое!")
+        if(name.length < 1 || name.length > 20 || password.length < 1 || password.length > 20 || email.length < 1 || email.length > 20 || password != password2) return false;
         console.log("Send data");
         
         var formData = JSON.stringify({
-          Name:name, Password:password
+          Name:name, Password:password, Email:email
         });
         var xhr = new XMLHttpRequest();
         xhr.open("POST", "/user-register");
@@ -50,14 +87,18 @@
           console.log(ev.target)
           switch(ev.target.status) {
             case 201:
-              localStorage.setItem("ID", ev.target.responseText)
-              document.getElementById("title0").textContent = "Пользователь успешно зарегистрирован! Через 3 секунды вы будете перенаправлены на главную страницу."
+              document.getElementById("title0").textContent = "На указанную почту направлено письмо с ссылкой для подтверждения аккаунта."
               localStorage.setItem("UserName", name)
               localStorage.setItem("Password", password)
-              setTimeout(() => {document.location.href = document.location.origin + "/Chat.html"}, 3000)
+              localStorage.setItem("Email", email)
+              // setTimeout(() => {document.location.href = document.location.origin + "/Chat.html"}, 3000)
               break
             case 400:
               document.getElementById("title1").textContent = "Неправильно введены данные пользователя!"
+              break
+            case 403:
+              document.getElementById("title1").textContent = "Вы уже отправили запрос на регистрацию! Проверьте свою почту."
+              document.getElementById("resend").hidden = false;
               break
             case 430:
               document.getElementById("title1").textContent = "Пользователь с таким именем уже зарегистрирован!"

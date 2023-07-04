@@ -33,8 +33,9 @@ namespace Main {
             Logger.Info(e.Exception.Data.Values.ToString());
         }
         protected override void OnMessage (MessageEventArgs msg) {
+            if(State != WebSocketState.Open)return;
             if(Program.CheckSpam(ID)) {
-                Sessions.CloseSession(ID, (ushort)HttpStatusCode.TooManyRequests, "Too many messages");
+                Context.WebSocket.Close((ushort)HttpStatusCode.TooManyRequests);
                 return;
             }
             if(
@@ -56,7 +57,7 @@ namespace Main {
                             AuthorID = "System",
                             Content="User is not found"
                         }));
-                        Sessions.CloseSession(ID);
+                        Context.WebSocket.Close();
                         break;
                     }
                     if(user.Value.Password != LoginData.Password) {
@@ -65,7 +66,7 @@ namespace Main {
                             AuthorID = "System",
                             Content="Incorrect password"
                         }));
-                        Sessions.CloseSession(ID);
+                        Context.WebSocket.Close();
                         break;
                     };
                     Logger.Debug("Websocket({0}): Successfully login <{1} - {2}>", ID, user.Value.Name, user.Value.ID);
@@ -83,7 +84,7 @@ namespace Main {
                             AuthorID = "System",
                             Content="You are not logged in"
                         }));
-                        Sessions.CloseSession(ID);
+                        Context.WebSocket.Close();
                         break;
                     }
                     var message = JsonSerializer.Deserialize<Message>(msg.Data);

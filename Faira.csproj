@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="CassandraCSharpDriver" Version="3.19.1" />
     <PackageReference Include="ilmerge" Version="3.0.29" />
+    <PackageReference Include="MailKit" Version="3.5.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="7.0.0" />
     <PackageReference Include="NLog" Version="5.1.1" />
