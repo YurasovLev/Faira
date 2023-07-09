@@ -16,6 +16,7 @@
         <button type="submit">Войти</button>
     <a href="Register.html">Зарегистрироваться</a>
     </form>
+    <a href="PasswordRecovery.html">Восстановить пароль</a>
   </body>
   <!-- <script src="Main.js"></script> -->
   <script>
@@ -31,13 +32,10 @@
         if(name.length < 1 || name.length > 20 || password.length < 1 || password.length > 20) return false;
         console.log("Send data");
         
-        var formData = JSON.stringify({
-          Name:name
-        });
         var xhr = new XMLHttpRequest();
         xhr.open("POST", "/user-check-by-name-or-email");
         xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
-        xhr.send(formData);
+        xhr.send(name);
         xhr.onreadystatechange = processing;
         function processing(ev) {
           console.log("Status of output: "+ev.target.status)
@@ -60,7 +58,7 @@
               document.getElementById("title0").textContent = "Вход выполнен успешно!"
               setTimeout(()=>document.location.href = document.location.origin + "/Chat.html",0);
               break
-            case 204:
+            case 401:
             case 404:
               document.getElementById("title1").textContent = "Неправильно введены данные пользователя!"
               break

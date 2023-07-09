@@ -16,9 +16,12 @@ namespace Main {
         public string Content {get; set;}
         public string AuthorID {get; set;}
         public string Type {get; set;}
+        public int Code {get; set;}
     }
     public struct LoginData {
         public string ID {get; set;}
         public string Password {get; set;}
     }
+    public class NotFoundException : Exception {}
+    public class AlreadyExistsException : Exception {}
 }

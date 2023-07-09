@@ -8,9 +8,9 @@ if ("WebSocket" in window) {
   }
 
   ws.onclose = (e)=>{
-    console.log("WebSocket close")
-    // console.log(e)
-    document.getElementById("Chat").textContent = "Disconnected from server\n" + document.getElementById("Chat").textContent;
+    console.log("WebSocket closed")
+    console.log(e)
+    pastMessage("Lightblue", `Соединение с сервером потеряно`)
   }
 
   ws.onerror = (err) => { 
@@ -24,17 +24,18 @@ if ("WebSocket" in window) {
     console.log(data)
     switch(data.Type) {
       case "Text":
-        pastMessage(`<div style="color:white">${data.Content}</div>`)
+        pastMessage("mistyrose", data.Content)
         break;
       case "Info":
-        pastMessage(`<div style="color:Lightblue">${data.Content}</div>`)
+        pastMessage("white", data.Content)
         break;
       case "Error":
-        // pastMessage(`<div style="color:red">${data.Content}</div>`)
-        if(data.Content == "User is not found" || "Incorrect password") {
-          pastMessage(`<div style="color:red">Вы не вошли в систему, через 3 секунды вы будете направлены на страницу входа.</div>`)
-          setTimeout(() => document.location.href = document.location.origin + "/Login.html", 3000)
-        }
+        if(data.Code == 400)
+          pastMessage("antiquewhite", `Ошибка в работе. <a href="${document.location.origin + "/Login.html"}">Войти</a>`)
+        if(data.Code == 401)
+          pastMessage("antiquewhite", `Вы не вошли в систему. <a href="${document.location.origin + "/Login.html"}">Войти</a>`)
+        if(data.Code == 429)
+          pastMessage("antiquewhite", `Вы шлете слишком много сообщений, потому вы отключены. <a href="${document.location.href}">Перезагрузить страницу</a>.`)
         break;
     }
   }
@@ -43,26 +44,26 @@ if ("WebSocket" in window) {
 let MyID = localStorage.getItem("ID");
 
 function login() {
-  ws.send(">Login")
-  let data = JSON.stringify({
-    Password: localStorage.getItem("Password"),
-    ID: MyID
-  })
-  ws.send(data)
+  ws.send(JSON.stringify({
+    Content: JSON.stringify({
+      ID: MyID,
+      Password: localStorage.getItem("Password")
+    }),
+    Author: MyID,
+    Type: "Login"
+  }))
 }
 
 function send(t) {
-  ws.send(">Message")
-  let data = JSON.stringify({
+  ws.send(JSON.stringify({
     Author: MyID,
     Content: t.value,
-    Type: "Text"
-  })
-  ws.send(data)
+    Type: "Message"
+  }))
   t.value = ""
 }
 
 let chat = document.getElementById("Chat")
-function pastMessage(msg) {
-  chat.innerHTML = msg + chat.innerHTML
+function pastMessage(color, msg) {
+  chat.innerHTML =`<div style="color:${color}">${msg}</div>` + chat.innerHTML
 }

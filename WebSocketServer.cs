@@ -9,7 +9,6 @@ namespace Main {
         NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
         public UserData? user {get; private set;}
         private bool start = false;
-        private string? TypeOfNextMessage;
         public Librarian librarian;
         public ProcessingWebsocket(Librarian _librain) {librarian = _librain;}
         protected override void OnOpen()
@@ -24,83 +23,69 @@ namespace Main {
         }
         protected override void OnError(WebSocketSharp.ErrorEventArgs e)
         {
-            Logger.Info(e.ToString());
-            Logger.Info(e.Message);
-            Logger.Info(e.Exception.ToString());
-            Logger.Info(e.Exception.Message);
-            Logger.Info(e.Exception.Source);
-            Logger.Info(e.Exception.Data.Keys.ToString());
-            Logger.Info(e.Exception.Data.Values.ToString());
+            Logger.Error($"Error on websocket {ID}");
+            Logger.Error("> " + e.ToString());
+            Logger.Error("> " + e.Message);
+            Logger.Error("> " + e.Exception.ToString());
+            Logger.Error("> " + e.Exception.Message);
+            Logger.Error("> " + e.Exception.Source);
+            Logger.Error("> " + e.Exception.Data.Keys.ToString());
+            Logger.Error("> " + e.Exception.Data.Values.ToString());
         }
+        private bool Authorize(LoginData data) {
+            if(State == WebSocketState.Open) {
+                user = librarian.GetUserByID(data.ID);
+                if(user is null || user.Value.Password != data.Password) {
+                    Send(JsonSerializer.Serialize(new Message() {
+                        Type = "Error",
+                        AuthorID = "System",
+                        Content="User is not found",
+                        Code = (int)HttpStatusCode.Unauthorized
+                    }));
+                    return false;
+                }
+            }
+            return true;
+        }
+        private void NotLogged() {
+            SendError("You are not logged in", (int)HttpStatusCode.Unauthorized);
+            Context.WebSocket.Close();
+        }
+        private void Close(CloseStatusCode code) {Context.WebSocket.Close(code);}
+        private void Close() {Context.WebSocket.Close();}
+        private void SendError(string Message, int Code)        {Send(JsonSerializer.Serialize(new Message() {Type="Error", AuthorID="System", Content=Message, Code=Code}));}
+        private void SendInfo(string Message)                   {Send(JsonSerializer.Serialize(new Message() {Type="Info",  AuthorID="System", Content=Message, Code=(int)HttpStatusCode.OK}));}
+        private void SendMessage(string Message, string Author) {Sessions.Broadcast(JsonSerializer.Serialize(new Message() {Type="Text",  AuthorID=Author,   Content=Message, Code=(int)HttpStatusCode.OK}));}
         protected override void OnMessage (MessageEventArgs msg) {
             if(State != WebSocketState.Open)return;
             if(Program.CheckSpam(ID)) {
-                Context.WebSocket.Close((ushort)HttpStatusCode.TooManyRequests);
+                SendError("Too many messages!", (int)HttpStatusCode.TooManyRequests);
+                Close(CloseStatusCode.ProtocolError);
                 return;
             }
-            if(
-               msg is null ||
-               string.IsNullOrWhiteSpace(msg.Data)
-            ) return;
+            if(msg is null || string.IsNullOrWhiteSpace(msg.Data)) return;
             Logger.Debug("Websocket({0}): Message \'{1}\'", ID, msg.Data);
-            if(msg.Data[0] == '>') {
-                TypeOfNextMessage = msg.Data;
-                return;
-            }
-            switch(TypeOfNextMessage) {
-                case ">Login": {
-                    var LoginData = JsonSerializer.Deserialize<LoginData>(msg.Data);
-                    user = librarian.GetUserByID(LoginData.ID);
-                    if(user is null) {
-                        Send(JsonSerializer.Serialize(new Message() {
-                            Type = "Error",
-                            AuthorID = "System",
-                            Content="User is not found"
-                        }));
-                        Context.WebSocket.Close();
+            try {
+                Message message = JsonSerializer.Deserialize<Message>(msg.Data);
+                switch(message.Type) {
+                    case "Login": {
+                        var LoginData = JsonSerializer.Deserialize<LoginData>(message.Content);
+                        if(!Authorize(LoginData)) {NotLogged(); break;}
+                        Logger.Debug("Websocket({0}): Successfully login <{1} - {2}>", ID, user.Value.Name, user.Value.ID);
+                        SendInfo("Login successfully");
                         break;
                     }
-                    if(user.Value.Password != LoginData.Password) {
-                        Send(JsonSerializer.Serialize(new Message() {
-                            Type = "Error",
-                            AuthorID = "System",
-                            Content="Incorrect password"
-                        }));
-                        Context.WebSocket.Close();
-                        break;
-                    };
-                    Logger.Debug("Websocket({0}): Successfully login <{1} - {2}>", ID, user.Value.Name, user.Value.ID);
-                    Send(JsonSerializer.Serialize(new Message() {
-                        Type = "Info",
-                        AuthorID = "System",
-                        Content="Login successfully"
-                    }));
-                    break;
-                }
-                case ">Message": {
-                    if(user is null) {
-                        Send(JsonSerializer.Serialize(new Message() {
-                            Type = "Error",
-                            AuthorID = "System",
-                            Content="You are not logged in"
-                        }));
-                        Context.WebSocket.Close();
+                    case "Message": {
+                        if(user is null) {NotLogged(); break;}
+                        SendMessage(user.Value.Name + ": " + message.Content, user.Value.ID);
                         break;
                     }
-                    var message = JsonSerializer.Deserialize<Message>(msg.Data);
-                    Sessions.Broadcast(JsonSerializer.Serialize<Message>(
-                        new Message(){
-                            Type="Text",
-                            AuthorID=user.Value.ID,
-                            Content=user.Value.Name + ": " + message.Content
-                        }
-                    ));
-                    break;
                 }
+            } catch(Exception e)
+                when (e is ArgumentNullException || e is JsonException) {
+                SendError("Protocol error", (int)HttpStatusCode.BadRequest);
+                Close(CloseStatusCode.ProtocolError);
             }
-            TypeOfNextMessage = null;
-
-            // Sessions.Broadcast(ID + ": " + msg.Data);
         }
     } 
 }

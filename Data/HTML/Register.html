@@ -31,14 +31,11 @@
     function resendLetter(e) {
       console.log("Post request to resend letter");
       let email = localStorage.getItem("Email");
-      
-      var formData = JSON.stringify({
-        Name:"", Password:"", Email:email
-      });
+
       var xhr = new XMLHttpRequest();
       xhr.open("POST", "/resend-letter");
       xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
-      xhr.send(formData);
+      xhr.send(email);
       xhr.onreadystatechange = (ev) => {
         console.log("Status of output: "+ev.target.status)
         console.log(ev.target)
@@ -49,8 +46,8 @@
           case 400:
             document.getElementById("title1").textContent = "Неправильно введены данные пользователя!"
             break
-          case 430:
-            document.getElementById("title1").textContent = "Пользователь с таким именем уже зарегистрирован!"
+          case 404:
+            document.getElementById("title1").textContent = "Запроса на регистрацию не найдено."
             break
         }
       }
