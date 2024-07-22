@@ -18,49 +18,54 @@ namespace Main
         private static volatile bool _IsRunning = false;
         public static void Main(string[] Args) {
             NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-            ConfigsPath = ReadSetting(Logger, "PathToConfigs") ?? "";
-            HtmlPath = ReadSetting(Logger, "PathToHtml") ?? "";
-            string MailAddress = ReadSetting(Logger, "Mail") ?? "Null";
-            string MailPassword = ReadSetting(Logger, "MailPassword") ?? "Null";
-
-
-
-            Console.CancelKeyPress += new ConsoleCancelEventHandler(InterruptConfirmationRequest); // Требование подтверждения прерывания программы.
-            NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(RootPath + ConfigsPath + "/NLog.config"); // Подгружаем конфиг для NLog
-
-            var port = int.Parse(Program.ReadSetting(Logger, "PORT") ?? "2020");
-            var updateRequestTimeMS = int.Parse(Program.ReadSetting(Logger, "CheckRequestTimeMS") ?? "10");
-            var checkSpamCountMSGS = int.Parse(Program.ReadSetting(Logger, "CheckSpamCountMSGS") ?? "10");
-            double minutes = 30;
             try {
-                minutes = double.Parse(Program.ReadSetting(Logger, "CacheTime") ?? "30");
-                Logger.Info("Cache time: {0} minutes.", minutes);
-            } catch(FormatException) {
-                Logger.Warn("CacheTime was not in a correct format. Set 30 minutes.");
-            }
+                ConfigsPath = ReadSetting(Logger, "PathToConfigs") ?? "";
+                HtmlPath = ReadSetting(Logger, "PathToHtml") ?? "";
+                string MailAddress = ReadSetting(Logger, "Mail") ?? "Null";
+                string MailPassword = ReadSetting(Logger, "MailPassword") ?? "Null";
 
-            var DBCluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
-            var librarian = new Librarian(DBCluster);
-            var server = new Server(port, MemoryCache.Default, librarian, updateRequestTimeMS, checkSpamCountMSGS, minutes, MailAddress, MailPassword);
-            var terminal = new Terminal(server);
-            var ServerTask = new Task(server.Run);
 
-            ServerTask.ContinueWith((Task t) => {t.Dispose();});
 
-            try {
-                Logger.Info("Program is running");
-                ServerTask.Start();
-                IsRunning = true;
-                terminal.Run();
-            } 
-            catch (Exception err) {
+                Console.CancelKeyPress += new ConsoleCancelEventHandler(InterruptConfirmationRequest); // Требование подтверждения прерывания программы.
+                NLog.LogManager.Configuration = new NLog.Config.XmlLoggingConfiguration(RootPath + ConfigsPath + "/NLog.config"); // Подгружаем конфиг для NLog
+
+                var port = int.Parse(Program.ReadSetting(Logger, "PORT") ?? "2020");
+                var updateRequestTimeMS = int.Parse(Program.ReadSetting(Logger, "CheckRequestTimeMS") ?? "10");
+                var checkSpamCountMSGS = int.Parse(Program.ReadSetting(Logger, "CheckSpamCountMSGS") ?? "10");
+                double minutes = 30;
+                try {
+                    minutes = double.Parse(Program.ReadSetting(Logger, "CacheTime") ?? "30");
+                    Logger.Info("Cache time: {0} minutes.", minutes);
+                } catch(FormatException) {
+                    Logger.Warn("CacheTime was not in a correct format. Set 30 minutes.");
+                }
+
+                var DBCluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
+                var librarian = new Librarian(DBCluster);
+                var server = new Server(port, MemoryCache.Default, librarian, updateRequestTimeMS, checkSpamCountMSGS, minutes, MailAddress, MailPassword);
+                var terminal = new Terminal(server, librarian);
+                var ServerTask = new Task(server.Run);
+
+                ServerTask.ContinueWith((Task t) => {t.Dispose();});
+
+                try {
+                    Logger.Info("Program is running");
+                    ServerTask.Start();
+                    IsRunning = true;
+                    terminal.Run();
+                } 
+                catch (Exception err) {
+                    Logger.Fatal(err, "Exception when starting program.");
+                }
+                finally {
+                    server.Stop();
+                    DBCluster.Shutdown();
+                    DBCluster.Dispose();
+                    Logger.Info("Program is stopped.");
+                    NLog.LogManager.Shutdown();
+                }
+            } catch (Exception err) {
                 Logger.Fatal(err, "Exception when starting program.");
-            }
-            finally {
-                server.Stop();
-                DBCluster.Shutdown();
-                Logger.Info("Program is stopped.");
-                NLog.LogManager.Shutdown();
             }
         }
         public static void Stop() {
@@ -73,7 +78,7 @@ namespace Main
         private static void InterruptConfirmationRequest(object? sender, ConsoleCancelEventArgs args)
         {
             Console.WriteLine("\nAre you sure you want to complete the program? [y/N]");
-            if(Char.ToLower(Console.ReadKey().KeyChar) == 'y') {
+            if(Char.ToLower(Console.ReadKey(true).KeyChar) == 'y') {
                 Console.WriteLine("Killing program");
             } else {
                 Console.WriteLine("Program continues work");
@@ -93,6 +98,7 @@ namespace Main
                     stream.Close();
                 }
                 Logger.Debug("\"{0}\" is read", Path);
+                Logger.Trace("Content: \"{0}\"", (Data ?? "null").ToString());
             } catch (UnauthorizedAccessException) {
                 Logger.Debug("Access to read \"{0}\" denied", Path);
             } catch (Exception e) when (e is DirectoryNotFoundException || e is FileNotFoundException) {
@@ -104,15 +110,15 @@ namespace Main
         /// Читает файл и кэширует файл. В случае отсутствия файла вернет null.
         ///</summary>
         public static string? ReadFileInCache(string Path, NLog.Logger Logger, ObjectCache Cache, CacheItemPolicy cacheItemPolicy) {
-            Logger.Debug("\'{0}\' search in cache", Path);
+            Logger.Trace("\'{0}\' search in cache", Path);
             string? Data = (string?)Cache[Path];
             if (Data is null) {
-                Logger.Debug("\'{0}\' is missing. Read", Path);
+                Logger.Trace("\'{0}\' is missing. Read", Path);
                 Data = ReadFile(Path, Logger);
                 if (!string.IsNullOrWhiteSpace(Data)) {
-                    Logger.Debug("\'{0}\' caching", Path);
+                    Logger.Trace("\'{0}\' caching", Path);
                     Cache.Set(Path, Data, cacheItemPolicy);
-                } else Logger.Debug("\'{0}\' is null", Path);
+                } else Logger.Trace("\'{0}\' is null", Path);
             }
             return Data;
         }

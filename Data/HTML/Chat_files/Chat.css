@@ -1,0 +1,26 @@
+div.Info {
+    color:aquamarine;
+}
+div.Message {
+    color: aliceblue
+}
+div.Error {
+    color: orangered
+}
+body {
+    background-color: #c0b6ba
+}
+input {
+    background-color: antiquewhite;
+    margin:     initial;
+    color: darkslateblue;
+    border-radius: 8px;
+    border-width: 2.5px;
+    outline: none
+}
+#Chat {
+    background-color: darkgray;
+    border-radius: 5px;
+    height: 100%;
+    width: 100%;
+}

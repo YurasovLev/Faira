@@ -45,7 +45,7 @@ namespace Main {
 
             cacheItemPolicy.SlidingExpiration = TimeSpan.FromMinutes(minutes);
             var SLogger = Logger; // Создано в целях избежания утечек памяти.
-            cacheItemPolicy.RemovedCallback += (CacheEntryRemovedArguments args) => {SLogger.Debug($"Cache removed: \'{args.CacheItem.Key}\' by reason \"{args.RemovedReason}\"");};
+            cacheItemPolicy.RemovedCallback += (CacheEntryRemovedArguments args) => {SLogger.Trace($"Cache removed: \'{args.CacheItem.Key}\' by reason \"{args.RemovedReason}\"");};
 
             SpamPolicy.SlidingExpiration = TimeSpan.FromSeconds(1);
         }
@@ -64,7 +64,7 @@ namespace Main {
                     IsRunning = true;
                 } else throw new Exception("Server don't started");
                 while(IsRunning) {
-                    MailClient.NoOpAsync();
+                    _=MailClient.NoOpAsync();
                     await Task.Delay (new TimeSpan (0, 1, 0));
                 }
             } catch(HttpListenerException e) {
@@ -92,36 +92,47 @@ namespace Main {
             if(req.IsWebSocketRequest)return;
             var res = e.Response;
 
+            byte[] contents;
+
             Logger.Debug("Request to get \"{0}\"", req.Url.AbsolutePath);
             switch(req.Url.AbsolutePath) {
-                case "/user-register-from": {
-                    Logger.Info(req.Url.Query.Substring(8));
+                case "/channels": {
+                    contents = JsonSerializer.SerializeToUtf8Bytes(librarian.GetChannels());
+                    res.StatusCode = (int) HttpStatusCode.OK;
+                    res.ContentEncoding = Encoding.UTF8;
+                    break;
+                }
+                default: {
+                    Logger.Trace("\"{0}\": Search in html files.", req.Url.AbsolutePath);
+                    var path = Program.HtmlPath + req.Url.AbsolutePath;
+
+                    contents = Encoding.UTF8.GetBytes(
+                        Program.ReadFileInCache(path, Logger, Cache, cacheItemPolicy) ?? ""
+                    );
+
+                    if (contents.Length < 1) {
+                        res.StatusCode = (int) HttpStatusCode.NotFound;
+                        Logger.Trace("\"{0}\": not found", req.Url.AbsolutePath);
+                        break;
+                    }
+                    Logger.Trace("\"{0}\": found", req.Url.AbsolutePath);
+
+                    if (path.EndsWith (".html")) {
+                        Logger.Trace("\"{0}\": is html file", req.Url.AbsolutePath);
+                        res.ContentType = "text/html";
+                        res.ContentEncoding = Encoding.UTF8;
+                    }
+                    if (path.EndsWith (".js")) {
+                        Logger.Trace("\"{0}\": is javascript file", req.Url.AbsolutePath);
+                        res.ContentType = "application/javascript";
+                        res.ContentEncoding = Encoding.UTF8;
+                    }
                     break;
                 }
             }
-            var path = Program.HtmlPath + req.Url.AbsolutePath;
-
-            byte[] contents = Encoding.UTF8.GetBytes(
-                (string?)Program.ReadFileInCache(path, Logger, Cache, cacheItemPolicy) ?? ""
-            );
-
-            if (contents.Length < 1) {
-                res.StatusCode = (int) HttpStatusCode.NotFound;
-                return;
-            }
-
-            if (path.EndsWith (".html")) {
-                res.ContentType = "text/html";
-                res.ContentEncoding = Encoding.UTF8;
-            }
-            else if (path.EndsWith (".js")) {
-                res.ContentType = "application/javascript";
-                res.ContentEncoding = Encoding.UTF8;
-            }
-
             res.ContentLength64 = contents.LongLength;
-
-            res.Close (contents, true);
+            res.Close(contents, true);
+            Logger.Trace("Responce closed.");
 
         }
         public void ProcessingPost(object? sender, HttpRequestEventArgs e) {

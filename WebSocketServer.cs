@@ -2,6 +2,7 @@ using WebSocketSharp;
 using WebSocketSharp.Server;
 using System.Net;
 using System.Text.Json;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Main {
     public sealed class ProcessingWebsocket : WebSocketBehavior {
@@ -10,6 +11,7 @@ namespace Main {
         public UserData? user {get; private set;}
         private bool start = false;
         public Librarian librarian;
+        public Channel? channel;
         public ProcessingWebsocket(Librarian _librain) {librarian = _librain;}
         protected override void OnOpen()
         {
@@ -19,6 +21,7 @@ namespace Main {
         protected override void OnClose(CloseEventArgs e)
         {
             base.OnClose(e);
+            if(channel is not null) channel.NewMessages -= ProcessMessages;
             Logger.Debug("WebSocket({0}): Disconnected", ID);
         }
         protected override void OnError(WebSocketSharp.ErrorEventArgs e)
@@ -36,7 +39,7 @@ namespace Main {
             if(State == WebSocketState.Open) {
                 user = librarian.GetUserByID(data.ID);
                 if(user is null || user.Value.Password != data.Password) {
-                    Send(JsonSerializer.Serialize(new Message() {
+                    Send(JsonSerializer.Serialize(new MessageData() {
                         Type = "Error",
                         AuthorID = "System",
                         Content="User is not found",
@@ -53,31 +56,69 @@ namespace Main {
         }
         private void Close(CloseStatusCode code) {Context.WebSocket.Close(code);}
         private void Close() {Context.WebSocket.Close();}
-        private void SendError(string Message, int Code)        {Send(JsonSerializer.Serialize(new Message() {Type="Error", AuthorID="System", Content=Message, Code=Code}));}
-        private void SendInfo(string Message)                   {Send(JsonSerializer.Serialize(new Message() {Type="Info",  AuthorID="System", Content=Message, Code=(int)HttpStatusCode.OK}));}
-        private void SendMessage(string Message, string Author) {Sessions.Broadcast(JsonSerializer.Serialize(new Message() {Type="Text",  AuthorID=Author,   Content=Message, Code=(int)HttpStatusCode.OK}));}
+        private void SendError(string Message, int Code)        {Send(JsonSerializer.Serialize(new MessageData() {Type="Error", AuthorID="System", Content=Message, Code=Code, TimeStamp=DateTimeOffset.Now}));}
+        private void SendInfo(string Message)                   {Send(JsonSerializer.Serialize(new MessageData() {Type="Info",  AuthorID="System", Content=Message, Code=(int)HttpStatusCode.OK, TimeStamp=DateTimeOffset.Now}));}
+        private void SendMessage(string Message, string Author) {
+            // Sessions.Broadcast(JsonSerializer.Serialize(new MessageData() {
+            //     Type="Text",  AuthorID=Author,   Content=Message, Code=(int)HttpStatusCode.OK, TimeStamp=DateTimeOffset.Now
+            // }));
+            if(channel is not null)
+                channel.SendMessage(new MessageData() {
+                    Type="Text",  AuthorID=Author,   Content=Message, Code=(int)HttpStatusCode.OK, TimeStamp=DateTimeOffset.Now
+                });
+            else throw new NullReferenceException("No channel selected");
+        }
         protected override void OnMessage (MessageEventArgs msg) {
             if(State != WebSocketState.Open)return;
             if(Program.CheckSpam(ID)) {
                 SendError("Too many messages!", (int)HttpStatusCode.TooManyRequests);
-                Close(CloseStatusCode.ProtocolError);
                 return;
             }
             if(msg is null || string.IsNullOrWhiteSpace(msg.Data)) return;
             Logger.Debug("Websocket({0}): Message \'{1}\'", ID, msg.Data);
             try {
-                Message message = JsonSerializer.Deserialize<Message>(msg.Data);
+                MessageData message = JsonSerializer.Deserialize<MessageData>(msg.Data);
                 switch(message.Type) {
                     case "Login": {
                         var LoginData = JsonSerializer.Deserialize<LoginData>(message.Content);
-                        if(!Authorize(LoginData)) {NotLogged(); break;}
+                        user = librarian.GetUserByID(LoginData.ID);
+                        if(user is null || user.Value.Password != LoginData.Password) {
+                            Send(JsonSerializer.Serialize(new MessageData() {
+                                Type = "Error",
+                                AuthorID = "System",
+                                Content="User is not found",
+                                Code = (int)HttpStatusCode.Unauthorized
+                            }));
+                            NotLogged();
+                            break;
+                        }
+                        channel = librarian.GetChannelByID(message.ChannelID);
+                        if(channel is not null) channel.NewMessages += ProcessMessages;
                         Logger.Debug("Websocket({0}): Successfully login <{1} - {2}>", ID, user.Value.Name, user.Value.ID);
                         SendInfo("Login successfully");
                         break;
                     }
                     case "Message": {
                         if(user is null) {NotLogged(); break;}
-                        SendMessage(user.Value.Name + ": " + message.Content, user.Value.ID);
+                        if(message.Content.Length > 200) {
+                            SendError("Too long", (int)HttpStatusCode.RequestEntityTooLarge);
+                            return;
+                        }
+                        try {SendMessage(user.Value.Name + ": " + message.Content, user.Value.ID);}
+                        catch(NullReferenceException) {SendError("No channel selected", (int)HttpStatusCode.BadRequest);}
+                        break;
+                    }
+                    case "ChangeChannel": {
+                        if(user is null) {NotLogged(); break;}
+                        if(message.Content.Length > 200) {
+                            SendError("Too long", (int)HttpStatusCode.RequestEntityTooLarge);
+                            return;
+                        }
+                        if(channel is not null) channel.NewMessages -= ProcessMessages;
+                        channel = librarian.GetChannelByID(message.Content);
+                        if(channel is null)
+                            SendError("Channel not found", (int)HttpStatusCode.NotFound);
+                        else channel.NewMessages += ProcessMessages;
                         break;
                     }
                 }
@@ -86,6 +127,10 @@ namespace Main {
                 SendError("Protocol error", (int)HttpStatusCode.BadRequest);
                 Close(CloseStatusCode.ProtocolError);
             }
+        }
+        public void ProcessMessages(MessageData Message) {
+            if(user is not null)
+                Send(JsonSerializer.Serialize(Message));
         }
     } 
 }

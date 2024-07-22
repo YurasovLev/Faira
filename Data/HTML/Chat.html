@@ -1,12 +1,25 @@
 <html>
   <head>
     <title>The test site</title>
+    <link rel="stylesheet" type="text/css" href="Chat.css">
   </head>
-  <body style="background-color: black;">
-    <input type="text" id="input" minlength="1" maxlength="50" 
-    onchange   = "send(this);">
-    <div id="Chat" style="background-color:darkcyan;white-space: pre-line;"></div>
-    </form>
+  <body>
+    <div id="ChannelsListBox"><div id="ChannelsList"></div></div>
+    <div id="Main">
+      <div id="status-bar" hidden="true">
+        <label for="user">Пользователь: <span id="user"></span></label>
+        <label for="channel-name">Чат: <span id="channel-name"></span></label>
+      </div>
+      <input id="input" type="text" minlength="1" maxlength="50" onchange="send(this);" hidden="true">
+      <div id="Chat" hidden="true"></div>
+      <div id="NotChangedChannel" hidden="true">
+        <p>Вы не выбрали канал.</p>
+        <p>Наведите курсор на панель слева и<br>выберите канал в всплывшем окне.</p>
+      </div>
+      <div id="NotConnected" hidden="false">
+        <p>Присоединение к серверу.</p>
+      </div>
+    </div>
   </body>
   <script src="Main.js"></script>
 </html>
