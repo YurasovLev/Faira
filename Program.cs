@@ -17,7 +17,7 @@ namespace Main
         public static bool IsRunning {get{return _IsRunning;} private set{_IsRunning=value;}}
         private static volatile bool _IsRunning = false;
         public static void Main(string[] Args) {
-            NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+            NLog.Logger Logger = LogManager.GetCurrentClassLogger();
             try {
                 ConfigsPath = ReadSetting(Logger, "PathToConfigs") ?? "";
                 HtmlPath = ReadSetting(Logger, "PathToHtml") ?? "";
@@ -40,7 +40,7 @@ namespace Main
                     Logger.Warn("CacheTime was not in a correct format. Set 30 minutes.");
                 }
 
-                var DBCluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
+                var DBCluster = Cluster.Builder().AddContactPoint("cassandra").Build();
                 var librarian = new Librarian(DBCluster);
                 var server = new Server(port, MemoryCache.Default, librarian, updateRequestTimeMS, checkSpamCountMSGS, minutes, MailAddress, MailPassword);
                 var terminal = new Terminal(server, librarian);
