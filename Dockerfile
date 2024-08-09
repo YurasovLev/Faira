@@ -6,7 +6,9 @@ COPY *.csproj .
 
 RUN dotnet restore
 
-COPY . .
+COPY ./*.cs .
+COPY ./Data/Configs ./Data/Configs
+COPY App.config App.config
 
 RUN dotnet publish --no-restore -o /app
 
@@ -22,6 +24,6 @@ COPY ./App.config ./App.config
 
 RUN mkdir -p ./Data/Logs
 
-EXPOSE 2020
+EXPOSE 2024 587
 
-ENTRYPOINT [ "./Faira" ]
+ENTRYPOINT [ "/app/Faira" ]

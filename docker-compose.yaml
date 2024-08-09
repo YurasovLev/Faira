@@ -1,0 +1,49 @@
+version: '3'
+
+services:
+  cassandra:
+    image: cassandra:4.1.5
+    container_name: cassandra
+    volumes:
+      - cassandra_db:/var/lib/cassandra/
+    networks:
+      - faira_net
+    restart: always
+    healthcheck:
+      test: ["CMD", "cqlsh", "-u cassandra", "-p cassandra" ,"-e describe keyspaces"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  cassandra-load-keyspace:
+      container_name: cassandra-load-keyspace
+      image: cassandra:4.1.5
+      depends_on:
+        cassandra:
+          condition: service_healthy
+      volumes:
+        - ./Data/Configs/cassandra_schema.cql:/schema.cql
+      networks:
+        - faira_net
+      command: /bin/bash -c "echo loading cassandra keyspace && cqlsh cassandra -f /schema.cql"
+
+  backend:
+    image: faira:latest
+    container_name: backend
+    networks:
+      - faira_net
+    ports:
+      - 80:2024
+      - 587:587
+    depends_on:
+      cassandra-load-keyspace:
+        condition: service_completed_successfully
+    
+
+volumes:
+  cassandra_db:
+    name: cassandra_db
+
+networks:
+  faira_net:
+    name: faira_net

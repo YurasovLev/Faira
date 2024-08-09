@@ -71,6 +71,7 @@ namespace Main {
                             }
                         }
                     } else Thread.Sleep(500);
+                } catch (InvalidOperationException) {
                 } catch (Exception err) {
                     Logger.Warn(err, "Exception during terminal operation");
                 }
